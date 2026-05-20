@@ -14,19 +14,6 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Share links
-
-The **Copy share link** action publishes the current blueprint snapshot to Supabase, then copies a `/view/<id>` URL. It will show **Share failed** if share storage is not configured.
-
-Create `.env.local` for local development:
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-```
-
-Supabase must have a `blueprints` table that allows the anon key to insert, select, and update rows. The app stores the full blueprint snapshot in that table and reuses the same row when an already-published blueprint is shared again.
-
 ## Current limitations
 
 - **Single-user editing only:** the app does not support multi-user collaboration, live cursors, comments, presence, locking, or merge/conflict handling.
