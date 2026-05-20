@@ -35,17 +35,15 @@ import {
   X,
   ChevronDown,
   ChevronRight,
-  FileText,
-  ClipboardPaste,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { parseXlsx, type SheetInfo } from '@/lib/import/parse';
 import {
   extractFromCsv,
   extractFromXlsx,
-  extractFromPastedText,
   type ExtractedRow,
 } from '@/lib/import/extract';
+import { extractFromPdf } from '@/lib/import/extract-pdf';
 import { MockImportMappingService } from '@/lib/import/mock-mapping-service';
 import type { MappedRow, RowRecordType, ReviewStatus } from '@/lib/import/mapping-types';
 import { commitMappedRows } from '@/lib/import/commit';
@@ -59,7 +57,6 @@ import { cn } from '@/lib/utils';
 // ---------------------------------------------------------------------------
 
 type AiImportStep = 'upload' | 'sheet-select' | 'extracting' | 'mapping' | 'review' | 'done';
-type InputMode = 'file' | 'paste';
 type RowFilter = 'all' | 'cards' | 'needs_attention' | 'accepted' | 'rejected';
 
 interface AiImportDialogProps {
@@ -397,9 +394,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<AiImportStep>('upload');
-  const [inputMode, setInputMode] = useState<InputMode>('file');
   const [dragOver, setDragOver] = useState(false);
-  const [pasteText, setPasteText] = useState('');
   const [fileName, setFileName] = useState('');
   const [sheets, setSheets] = useState<SheetInfo[]>([]);
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
@@ -417,9 +412,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
 
   const reset = useCallback(() => {
     setStep('upload');
-    setInputMode('file');
     setDragOver(false);
-    setPasteText('');
     setFileName('');
     setSheets([]);
     setWorkbook(null);
@@ -501,8 +494,22 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
         return;
       }
 
+      if (ext === 'pdf') {
+        const buffer = await file.arrayBuffer();
+        const extraction = await extractFromPdf(buffer, file.name);
+        setExtractedRows(extraction.rows);
+        if (extraction.errors.length > 0) {
+          setMappingErrors(extraction.errors);
+          setMappedRows([]);
+          setStep('review');
+        } else {
+          await runMapping(extraction.rows);
+        }
+        return;
+      }
+
       setMappingErrors([
-        `Unsupported file type: .${ext ?? 'unknown'}. Use CSV, XLSX, or paste text below.`,
+        `Unsupported file type: .${ext ?? 'unknown'}. Use CSV, XLSX, or PDF.`,
       ]);
       setMappedRows([]);
       setStep('review');
@@ -523,18 +530,6 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
     },
     [workbook, fileName, runMapping],
   );
-
-  // ── Paste text ────────────────────────────────────────────────────────────
-
-  const handlePasteSubmit = useCallback(async () => {
-    if (!pasteText.trim()) return;
-    setFileName('pasted');
-    setStep('extracting');
-    await new Promise((r) => setTimeout(r, 80));
-    const extraction = extractFromPastedText(pasteText);
-    setExtractedRows(extraction.rows);
-    await runMapping(extraction.rows);
-  }, [pasteText, runMapping]);
 
   // ── Row editing ───────────────────────────────────────────────────────────
 
@@ -623,101 +618,52 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
             AI-assisted import
           </DialogTitle>
           <DialogDescription className="text-[13px]">
-            Upload a file or paste tabular content — the AI will propose mappings for you to
-            review before committing to the board.
+            Upload a file — the AI will propose mappings for you to review before committing to the board. Supports CSV, XLSX, and PDF (e.g. Confluence exports).
           </DialogDescription>
         </DialogHeader>
 
         {/* ── Upload ────────────────────────────────────────────────────── */}
         {step === 'upload' && (
-          <div className="space-y-4 px-6 py-5">
-            {/* Mode tabs */}
-            <div className="flex rounded-lg border border-neutral-200 p-0.5">
-              <button
-                onClick={() => setInputMode('file')}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-medium transition-colors',
-                  inputMode === 'file'
-                    ? 'bg-white text-neutral-800 shadow-sm'
-                    : 'text-neutral-500 hover:text-neutral-700',
-                )}
-              >
-                <FileText className="h-3.5 w-3.5" /> Upload file
-              </button>
-              <button
-                onClick={() => setInputMode('paste')}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-medium transition-colors',
-                  inputMode === 'paste'
-                    ? 'bg-white text-neutral-800 shadow-sm'
-                    : 'text-neutral-500 hover:text-neutral-700',
-                )}
-              >
-                <ClipboardPaste className="h-3.5 w-3.5" /> Paste text
-              </button>
-            </div>
-
-            {inputMode === 'file' ? (
-              <div
-                className={cn(
-                  'flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-12 transition-colors',
-                  dragOver ? 'border-violet-400 bg-violet-50' : 'border-neutral-200 bg-neutral-50/50',
-                )}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  const file = e.dataTransfer.files[0];
+          <div className="px-6 py-5">
+            <div
+              className={cn(
+                'flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-12 transition-colors',
+                dragOver ? 'border-violet-400 bg-violet-50' : 'border-neutral-200 bg-neutral-50/50',
+              )}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files[0];
+                if (file) processFile(file);
+              }}
+            >
+              <Upload className="h-8 w-8 text-neutral-300" />
+              <p className="text-[14px] font-medium text-neutral-600">
+                Drop a file here or{' '}
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="text-violet-600 underline underline-offset-2 hover:text-violet-700"
+                >
+                  browse
+                </button>
+              </p>
+              <p className="text-[12px] text-neutral-400">CSV, XLSX, or PDF</p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,.xlsx,.xls,.pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
                   if (file) processFile(file);
                 }}
-              >
-                <Upload className="h-8 w-8 text-neutral-300" />
-                <p className="text-[14px] font-medium text-neutral-600">
-                  Drop a file here or{' '}
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    className="text-violet-600 underline underline-offset-2 hover:text-violet-700"
-                  >
-                    browse
-                  </button>
-                </p>
-                <p className="text-[12px] text-neutral-400">CSV or XLSX</p>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) processFile(file);
-                  }}
-                  className="hidden"
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-[12px] text-neutral-500">
-                  Paste a table (tab- or comma-separated). Include a header row for best results.
-                </p>
-                <textarea
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  placeholder={"Stage\tStep\tAction\nPrepare\tGather data\tUser downloads template"}
-                  rows={8}
-                  className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 font-mono text-[12px] text-neutral-700 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200"
-                />
-                <button
-                  onClick={handlePasteSubmit}
-                  disabled={!pasteText.trim()}
-                  className="rounded-lg bg-neutral-900 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-neutral-700 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Analyse content
-                </button>
-              </div>
-            )}
+                className="hidden"
+              />
+            </div>
           </div>
         )}
 

@@ -14,7 +14,7 @@ import {
   type DragOverEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { ArrowUp, Hand, Maximize2, Minimize2, Film, ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ArrowUp, Hand, ImagePlus, Maximize2, Minimize2, Film, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { type Card, type LaneKey, type StoryboardImage } from '@/lib/types';
 import { LaneLabel } from './LaneLabel';
@@ -24,6 +24,7 @@ import { StageDescription } from './StageDescription';
 import { StepHeader } from './StepHeader';
 import { BlueprintCard } from './BlueprintCard';
 import { StoryboardCell } from './StoryboardCell';
+import { ImageCropModal } from './ImageCropModal';
 import { CardDetailPanel } from './CardDetailPanel';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -172,6 +173,7 @@ export function Board() {
   const storyboardImages = useBlueprintStore((s) => s.storyboardImages);
   const storyboardVisible = useBlueprintStore((s) => s.storyboardVisible);
   const storyboardCollapsed = useBlueprintStore((s) => s.storyboardCollapsed);
+  const addStep = useBlueprintStore((s) => s.addStep);
   const addStoryboardImage = useBlueprintStore((s) => s.addStoryboardImage);
   const updateStoryboardImage = useBlueprintStore((s) => s.updateStoryboardImage);
   const removeStoryboardImage = useBlueprintStore((s) => s.removeStoryboardImage);
@@ -180,6 +182,7 @@ export function Board() {
 
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [panMode, setPanMode] = useState(false);
+  const [storyboardUploadStageId, setStoryboardUploadStageId] = useState<string | null>(null);
   const [isPointerPanning, setIsPointerPanning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -379,6 +382,7 @@ export function Board() {
 
       return sortedStages.some((stage) => {
         const stageSteps = stepsPerStage.get(stage.id) || [];
+        if (stageSteps.length === 0) return false;
         if (stageSteps.length !== 1) return true;
         const onlyStep = stageSteps[0];
         return Boolean(onlyStep && onlyStep.title.trim() !== stage.title.trim());
@@ -971,9 +975,18 @@ export function Board() {
                         return (
                           <div
                             key={stage.id}
-                            className="shrink-0 border-r border-neutral-200"
+                            className="flex shrink-0 items-start border-r border-neutral-200 p-2"
                             style={{ width: STEP_WIDTH, minHeight: STORYBOARD_ROW_H }}
-                          />
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setStoryboardUploadStageId(stage.id)}
+                              className="flex min-h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-neutral-200 bg-white/60 p-2 text-center transition-colors hover:border-neutral-300 hover:bg-white"
+                            >
+                              <ImagePlus className="h-5 w-5 text-neutral-400" />
+                              <span className="text-[11px] font-medium text-neutral-600">Add image / screen</span>
+                            </button>
+                          </div>
                         );
                       }
                       return stageSteps.map((step, stepIdx) => (
@@ -1160,6 +1173,22 @@ export function Board() {
       <DragOverlay dropAnimation={{ duration: 200, easing: 'ease' }}>
         {activeCard ? <BlueprintCard card={activeCard} isDragOverlay /> : null}
       </DragOverlay>
+
+      <ImageCropModal
+        open={storyboardUploadStageId !== null}
+        onOpenChange={(open) => { if (!open) setStoryboardUploadStageId(null); }}
+        onConfirm={(dataUrl) => {
+          if (!storyboardUploadStageId) return;
+          addStep(storyboardUploadStageId, 'New stage');
+          const step = useBlueprintStore.getState().steps.find(
+            (s) => s.stageId === storyboardUploadStageId,
+          );
+          if (step) addStoryboardImage(step.id, dataUrl);
+          setStoryboardUploadStageId(null);
+        }}
+        defaultFormat="page"
+        lockFormat="page"
+      />
     </DndContext>
   );
 }
