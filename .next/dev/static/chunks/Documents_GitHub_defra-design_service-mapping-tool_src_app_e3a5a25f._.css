@@ -980,10 +980,6 @@
     display: table;
   }
 
-  .table-row {
-    display: table-row;
-  }
-
   .field-sizing-content {
     field-sizing: content;
   }
@@ -1132,6 +1128,10 @@
 
   .min-h-24 {
     min-height: calc(var(--spacing) * 24);
+  }
+
+  .min-h-28 {
+    min-height: calc(var(--spacing) * 28);
   }
 
   .min-h-32 {
@@ -1469,6 +1469,10 @@
     gap: calc(var(--spacing) * 4);
   }
 
+  .gap-5 {
+    gap: calc(var(--spacing) * 5);
+  }
+
   .gap-6 {
     gap: calc(var(--spacing) * 6);
   }
@@ -1501,12 +1505,6 @@
     --tw-space-y-reverse: 0;
     margin-block-start: calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));
     margin-block-end: calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)));
-  }
-
-  :where(.space-y-4 > :not(:last-child)) {
-    --tw-space-y-reverse: 0;
-    margin-block-start: calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));
-    margin-block-end: calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)));
   }
 
   :where(.space-y-6 > :not(:last-child)) {
@@ -2166,6 +2164,10 @@
     padding: calc(var(--spacing) * 4);
   }
 
+  .p-5 {
+    padding: calc(var(--spacing) * 5);
+  }
+
   .p-px {
     padding: 1px;
   }
@@ -2333,6 +2335,11 @@
 
   .text-\[18px\] {
     font-size: 18px;
+  }
+
+  .leading-5 {
+    --tw-leading: calc(var(--spacing) * 5);
+    line-height: calc(var(--spacing) * 5);
   }
 
   .leading-none {
@@ -3250,10 +3257,6 @@
     border-color: var(--color-blue-400);
   }
 
-  .focus\:border-violet-400:focus {
-    border-color: var(--color-violet-400);
-  }
-
   .focus\:bg-accent:focus {
     background-color: var(--accent);
   }
@@ -3297,11 +3300,6 @@
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
 
-  .focus\:ring-1:focus {
-    --tw-ring-shadow: var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
-    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
-  }
-
   .focus\:ring-2:focus {
     --tw-ring-shadow: var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
@@ -3309,10 +3307,6 @@
 
   .focus\:ring-blue-400:focus {
     --tw-ring-color: var(--color-blue-400);
-  }
-
-  .focus\:ring-violet-200:focus {
-    --tw-ring-color: var(--color-violet-200);
   }
 
   .focus\:outline-none:focus {
@@ -3864,8 +3858,20 @@
   }
 
   @media (min-width: 40rem) {
+    .sm\:max-w-md {
+      max-width: var(--container-md);
+    }
+  }
+
+  @media (min-width: 40rem) {
     .sm\:max-w-sm {
       max-width: var(--container-sm);
+    }
+  }
+
+  @media (min-width: 40rem) {
+    .sm\:grid-cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 

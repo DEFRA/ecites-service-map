@@ -24,9 +24,16 @@ import { LibrarySheet } from './LibrarySheet';
 import { cn } from '@/lib/utils';
 import { getLaneTitle, L1_HIDDEN_LANE_KEYS, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES } from '@/lib/lane-definitions';
 import { useLibraryStore } from '@/store/library-store';
-import { exportMarkdown } from '@/lib/export-markdown';
+import { exportBlueprintPdf, exportBlueprintSvg, visualExportFilename } from '@/lib/export-visual';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
 import type { Card, Opportunity } from '@/lib/types';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const SHOW_EXAMPLE_TREE_MENU_ITEM = false;
 /** Blank Goal → Outcome → Opportunity tree (“New opportunity tree” in UI). Hidden from menu; store action remains available. */
@@ -122,6 +129,7 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const [name, setName] = useState(() => blueprintTitleLabel(blueprint.serviceName));
   const [showLanes, setShowLanes] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle');
   const [shareError, setShareError] = useState('');
@@ -147,16 +155,33 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
     setEditingName(false);
   };
 
-  const handleExportMarkdown = () => {
-    const state = useBlueprintStore.getState();
-    const md = exportMarkdown(state);
-    const blob = new Blob([md], { type: 'text/markdown' });
+  const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${state.blueprint.serviceName.replace(/\s+/g, '_').toLowerCase()}_blueprint.md`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportSvg = () => {
+    const state = useBlueprintStore.getState();
+    const svg = exportBlueprintSvg(state);
+    downloadBlob(
+      new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+      visualExportFilename(state, 'svg'),
+    );
+    setShowExportDialog(false);
+  };
+
+  const handleExportPdf = () => {
+    const state = useBlueprintStore.getState();
+    const pdf = exportBlueprintPdf(state);
+    downloadBlob(
+      new Blob([pdf], { type: 'application/pdf' }),
+      visualExportFilename(state, 'pdf'),
+    );
+    setShowExportDialog(false);
   };
 
   const handleQuickSaveToLibrary = () => {
@@ -507,12 +532,12 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                   <button
                     role="menuitem"
                     onClick={() => {
-                      handleExportMarkdown();
+                      setShowExportDialog(true);
                       setShowMenu(false);
                     }}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
-                    <Download aria-hidden="true" className="h-3.5 w-3.5" /> Export Markdown
+                    <Download aria-hidden="true" className="h-3.5 w-3.5" /> Export
                   </button>
                   <button
                     role="menuitem"
@@ -558,6 +583,39 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
           </div>
         </div>
       </header>
+
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="gap-5 p-5 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export blueprint</DialogTitle>
+            <DialogDescription>
+              Choose a visual export format for the full board.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={handleExportSvg}
+              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <span className="text-sm font-semibold text-neutral-900">SVG</span>
+              <span className="text-xs leading-5 text-neutral-500">
+                Editable vector artwork for design tools and documentation.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <span className="text-sm font-semibold text-neutral-900">PDF</span>
+              <span className="text-xs leading-5 text-neutral-500">
+                Portable document for sharing, review, and lightweight printing.
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <LibrarySheet open={showLibrary} onClose={() => setShowLibrary(false)} />
     </>
