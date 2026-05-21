@@ -4,12 +4,15 @@
  * Extracts tabular content from PDFs (e.g. Confluence-exported service maps)
  * into ExtractedRow[] for the AI mapping pipeline.
  *
- * For Confluence-style tables the column headers encode the blueprint schema
- * directly ("Step" → stage, "Sub step" → step, "Pain point" → pain_point lane,
- * etc.), so we classify each column up-front and emit one ExtractedRow per
- * item per lane column — fully pre-filled with stage, step, lane_key and
- * card_title — so the mapping service can commit with high confidence and no
- * manual lane assignment is needed.
+ * Key design decisions:
+ *  - Column headers in Confluence PDFs often wrap across multiple lines ("Sub\nstep",
+ *    "Research\nquestions"). We detect the full header block by collecting all rows
+ *    before the first numbered data row ("1.", "2.3", etc.) and merging fragments
+ *    column-by-column.
+ *  - Once headers are classified (stage / step / lane), each data row emits one
+ *    ExtractedRow per non-empty lane cell, pre-filled with stage, step, lane_key,
+ *    and card_title so the mapping service has full confidence and no manual
+ *    lane assignment is needed.
  */
 
 import type { LaneKey } from '../types';
@@ -19,22 +22,20 @@ import type { ExtractedRow, ExtractionResult } from './extract';
 // Column classification
 // ---------------------------------------------------------------------------
 
-/** Headers that represent the top-level stage. */
-const STAGE_HEADERS = new Set(['step', 'stage', 'phase', 'process step']);
+const STAGE_HEADERS = new Set([
+  'step', 'stage', 'phase', 'process step', 'journey step',
+]);
 
-/** Headers that represent the step (sub-stage). */
 const STEP_HEADERS = new Set([
   'sub step', 'sub-step', 'substep',
   'sub stage', 'sub-stage', 'substage',
 ]);
 
-/** Headers that represent the sub-step (treated as step if no step col present). */
 const SUB_STEP_HEADERS = new Set([
-  'sub sub step', 'sub-sub-step', 'sub sub stage', 'sub-sub step',
-  'sub sub stage', 'sub substep',
+  'sub sub step', 'sub-sub-step', 'subsubstep',
+  'sub sub stage', 'sub-sub stage', 'sub sub-step',
 ]);
 
-/** Column header → lane key, covering common Confluence column names. */
 const HEADER_TO_LANE: Record<string, LaneKey> = {
   actor: 'actor',
   actors: 'actor',
@@ -91,20 +92,19 @@ function classifyHeader(raw: string): ColRole {
 }
 
 // ---------------------------------------------------------------------------
-// Internal geometry types
+// Internal types
 // ---------------------------------------------------------------------------
 
 interface RawItem {
   str: string;
   x: number;
-  /** top-down screen y (0 = top of page) */
-  y: number;
+  y: number; // top-down (0 = top of page)
   width: number;
   page: number;
 }
 
 // ---------------------------------------------------------------------------
-// PDF.js text extraction
+// PDF.js extraction
 // ---------------------------------------------------------------------------
 
 async function extractRawItems(buffer: ArrayBuffer): Promise<RawItem[]> {
@@ -132,7 +132,7 @@ async function extractRawItems(buffer: ArrayBuffer): Promise<RawItem[]> {
       result.push({
         str: s,
         x: item.transform[4],
-        y: vp.height - item.transform[5], // flip to top-down
+        y: vp.height - item.transform[5],
         width: item.width ?? 0,
         page: p,
       });
@@ -168,21 +168,15 @@ function nearest(value: number, centroids: number[]): number {
 }
 
 // ---------------------------------------------------------------------------
-// Table grid construction
+// Grid construction
 // ---------------------------------------------------------------------------
 
-/**
- * Builds a 2D grid of cells from raw PDF text items.
- *
- * Each cell is an ordered list of (y, text) pairs so callers can split on
- * large y-gaps to separate multiple items within one cell.
- */
+/** grid[rowIdx][colIdx] = fragments sorted top-to-bottom */
 function buildGrid(
   items: RawItem[],
   colCentroids: number[],
   rowCentroids: number[],
 ): Array<Array<Array<{ y: number; str: string }>>> {
-  // grid[row][col] = list of {y, str} fragments
   const grid: Array<Array<Array<{ y: number; str: string }>>> = Array.from(
     { length: rowCentroids.length },
     () => Array.from({ length: colCentroids.length }, () => []),
@@ -194,19 +188,73 @@ function buildGrid(
     grid[row][col].push({ y: item.y, str: item.str });
   }
 
-  // Sort fragments within each cell by y so text reads top-to-bottom
   for (const row of grid) {
-    for (const cell of row) {
-      cell.sort((a, b) => a.y - b.y);
-    }
+    for (const cell of row) cell.sort((a, b) => a.y - b.y);
   }
 
   return grid;
 }
 
+// ---------------------------------------------------------------------------
+// Header block detection (handles multi-line wrapped headers)
+// ---------------------------------------------------------------------------
+
 /**
- * Given a cell's fragments, split into individual items by detecting
- * large y-gaps (> 1.5× median line height within the cell).
+ * Returns the range [headerStartRow, headerEndRow] (inclusive) of the header
+ * block. The block ends just before the first row whose leftmost non-empty
+ * cell starts with a digit (e.g. "1.", "2.3") — those are data rows.
+ *
+ * All rows in the block are merged column-by-column to build the full header
+ * strings (handles "Sub\nstep", "Research\nquestions", etc.).
+ */
+function detectHeaderBlock(
+  grid: Array<Array<Array<{ y: number; str: string }>>>,
+  colCentroids: number[],
+): { headers: string[]; firstDataRow: number } | null {
+  // Find first grid row that has ≥ 2 non-empty cells (start of the table)
+  let tableStartRow = -1;
+  for (let r = 0; r < grid.length; r++) {
+    if (grid[r].filter((c) => c.length > 0).length >= 2) {
+      tableStartRow = r;
+      break;
+    }
+  }
+  if (tableStartRow === -1) return null;
+
+  // Walk forward to find where data rows begin (first numeric-prefixed cell)
+  const NUMERIC_ROW = /^\s*\d+[\.\)]/;
+  let firstDataRow = grid.length;
+  for (let r = tableStartRow; r < grid.length; r++) {
+    // Check all cells in this row for a numeric prefix
+    const rowText = grid[r].flatMap((c) => c.map((f) => f.str)).join(' ');
+    if (NUMERIC_ROW.test(rowText) && r > tableStartRow) {
+      firstDataRow = r;
+      break;
+    }
+  }
+
+  // Merge all rows from tableStartRow to firstDataRow-1 into column headers
+  const headers: string[] = new Array(colCentroids.length).fill('');
+  for (let r = tableStartRow; r < firstDataRow; r++) {
+    for (let c = 0; c < colCentroids.length; c++) {
+      const text = grid[r][c].map((f) => f.str).join(' ').trim();
+      if (text) {
+        headers[c] = headers[c] ? `${headers[c]} ${text}` : text;
+      }
+    }
+  }
+
+  return { headers, firstDataRow };
+}
+
+// ---------------------------------------------------------------------------
+// Intra-cell item splitting
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a cell's fragments into individual items using y-gaps.
+ * Fragments at similar y (within lineHeight) belong to the same item;
+ * a larger gap signals a new item within the same cell.
  */
 function splitCellIntoItems(
   fragments: Array<{ y: number; str: string }>,
@@ -214,7 +262,7 @@ function splitCellIntoItems(
 ): string[] {
   if (!fragments.length) return [];
 
-  const threshold = lineHeight * 1.4;
+  const threshold = lineHeight * 1.8;
   const groups: string[][] = [[fragments[0].str]];
 
   for (let i = 1; i < fragments.length; i++) {
@@ -226,9 +274,7 @@ function splitCellIntoItems(
     }
   }
 
-  return groups
-    .map((g) => g.join(' ').trim())
-    .filter(Boolean);
+  return groups.map((g) => g.join(' ').trim()).filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +285,7 @@ export async function extractFromPdf(
   buffer: ArrayBuffer,
   fileName: string,
 ): Promise<ExtractionResult> {
-  // -- 1. Pull text items from all pages
+  // 1. Extract raw text items
   let rawItems: RawItem[];
   try {
     rawItems = await extractRawItems(buffer);
@@ -261,7 +307,7 @@ export async function extractFromPdf(
     };
   }
 
-  // -- 2. Cluster into columns and rows
+  // 2. Cluster into columns and rows
   const sortedX = [...rawItems.map((i) => i.x)].sort((a, b) => a - b);
   const colCentroids = centroidClusters(sortedX, 18);
 
@@ -272,22 +318,17 @@ export async function extractFromPdf(
     return {
       rows: [],
       headers: [],
-      errors: ['Could not detect table columns in PDF. Ensure the file has a multi-column table.'],
+      errors: ['Could not detect table columns. Ensure the PDF contains a multi-column table.'],
       warnings: [],
     };
   }
 
-  // -- 3. Build grid
+  // 3. Build grid
   const grid = buildGrid(rawItems, colCentroids, rowCentroids);
 
-  // -- 4. Find the header row — first row with ≥2 non-empty cells
-  let headerRowIdx = -1;
-  for (let r = 0; r < grid.length; r++) {
-    const nonEmpty = grid[r].filter((c) => c.length > 0).length;
-    if (nonEmpty >= 2) { headerRowIdx = r; break; }
-  }
-
-  if (headerRowIdx === -1) {
+  // 4. Detect header block (handles wrapped multi-line headers)
+  const headerResult = detectHeaderBlock(grid, colCentroids);
+  if (!headerResult) {
     return {
       rows: [],
       headers: [],
@@ -296,17 +337,13 @@ export async function extractFromPdf(
     };
   }
 
-  // -- 5. Read header strings and classify each column
-  const headers: string[] = grid[headerRowIdx].map((frags) =>
-    frags.map((f) => f.str).join(' ').trim(),
-  );
+  const { headers, firstDataRow } = headerResult;
 
+  // 5. Classify columns
   const colRoles: ColRole[] = headers.map(classifyHeader);
 
-  // Determine column indices for structural fields
   const stageColIdx = colRoles.findIndex((r) => r.type === 'stage');
   const stepColIdx = colRoles.findIndex((r) => r.type === 'step');
-  // Use sub_step as step if no step column present
   const subStepColIdx = colRoles.findIndex((r) => r.type === 'sub_step');
   const effectiveStepColIdx = stepColIdx !== -1 ? stepColIdx : subStepColIdx;
 
@@ -315,44 +352,38 @@ export async function extractFromPdf(
     if (role.type === 'lane') laneColIndices.push({ col: idx, laneKey: role.laneKey });
   });
 
-  // Fall back to header-based extraction if no known columns found
-  const hasKnownStructure = stageColIdx !== -1 || effectiveStepColIdx !== -1 || laneColIndices.length > 0;
+  const hasKnownStructure =
+    stageColIdx !== -1 || effectiveStepColIdx !== -1 || laneColIndices.length > 0;
 
-  // -- 6. Estimate typical line height for intra-cell item splitting
+  // 6. Estimate typical line height
   const yGaps: number[] = [];
   for (let i = 1; i < rowCentroids.length; i++) {
     yGaps.push(rowCentroids[i] - rowCentroids[i - 1]);
   }
   yGaps.sort((a, b) => a - b);
-  const lineHeight = yGaps[Math.floor(yGaps.length * 0.25)] ?? 12; // lower quartile = typical line height
+  const lineHeight = yGaps[Math.floor(yGaps.length * 0.25)] ?? 12;
 
-  // -- 7. Emit ExtractedRows
+  // 7. Emit ExtractedRows
   const extractedRows: ExtractedRow[] = [];
   let sourceRowNumber = 2;
-
-  // Track running stage/step across rows (Confluence tables repeat the step
-  // across sub-rows for cells that span vertically)
   let currentStage = '';
   let currentStep = '';
 
-  for (let r = headerRowIdx + 1; r < grid.length; r++) {
+  for (let r = firstDataRow; r < grid.length; r++) {
     const rowCells = grid[r];
 
-    // Update stage/step context from this row if present
-    const stageText = stageColIdx !== -1
-      ? rowCells[stageColIdx].map((f) => f.str).join(' ').trim()
-      : '';
-    const stepText = effectiveStepColIdx !== -1
-      ? rowCells[effectiveStepColIdx].map((f) => f.str).join(' ').trim()
-      : '';
-
-    if (stageText) currentStage = stageText;
-    if (stepText) currentStep = stepText;
-
-    if (!currentStage && !currentStep) continue; // skip pre-table content
+    // Update running stage/step context when cells are non-empty
+    if (stageColIdx !== -1) {
+      const t = rowCells[stageColIdx].map((f) => f.str).join(' ').trim();
+      if (t) currentStage = t;
+    }
+    if (effectiveStepColIdx !== -1) {
+      const t = rowCells[effectiveStepColIdx].map((f) => f.str).join(' ').trim();
+      if (t) currentStep = t;
+    }
 
     if (hasKnownStructure) {
-      // Emit one ExtractedRow per item per lane column
+      // One ExtractedRow per item per lane column
       for (const { col, laneKey } of laneColIndices) {
         const cellFrags = rowCells[col];
         if (!cellFrags.length) continue;
@@ -360,29 +391,25 @@ export async function extractFromPdf(
         const items = splitCellIntoItems(cellFrags, lineHeight);
         for (const item of items) {
           if (!item) continue;
-          const cells: Record<string, string> = {
-            stage: currentStage,
-            step: currentStep,
-            lane_key: laneKey,
-            card_title: item,
-            record_type: 'card_row',
-          };
           extractedRows.push({
             sourceType: 'pdf_extracted',
             sourceFileName: fileName,
             sourceSheetOrPage: 'PDF',
             sourceRowNumber: sourceRowNumber++,
             extractedHeaders: ['stage', 'step', 'lane_key', 'card_title'],
-            extractedCells: cells,
+            extractedCells: {
+              stage: currentStage,
+              step: currentStep,
+              lane_key: laneKey,
+              card_title: item,
+              record_type: 'card_row',
+            },
             rawText: `${currentStage}\t${currentStep}\t${laneKey}\t${item}`,
           });
         }
       }
     } else {
-      // No recognised column structure — fall back to one row per table row
-      const nonEmpty = rowCells.filter((c) => c.length > 0);
-      if (!nonEmpty.length) continue;
-
+      // Fallback: one row per table row with raw cell values
       const cells: Record<string, string> = {};
       const rawParts: string[] = [];
       for (let c = 0; c < headers.length; c++) {
@@ -392,6 +419,7 @@ export async function extractFromPdf(
         cells[h] = val;
         if (val) rawParts.push(val);
       }
+      if (!rawParts.length) continue;
 
       extractedRows.push({
         sourceType: 'pdf_extracted',
@@ -408,8 +436,8 @@ export async function extractFromPdf(
   const warnings: string[] = [];
   if (!hasKnownStructure) {
     warnings.push(
-      'Column headers did not match expected blueprint names (Step, Sub step, Actor, Pain point, etc.). ' +
-      'Rows have been extracted as-is — you may need to manually assign lanes.',
+      'Column headers did not match expected names (Step, Sub step, Actor, Pain point, etc.). ' +
+        'Rows extracted as-is — you may need to manually assign lanes in the review step.',
     );
   }
 
@@ -417,8 +445,9 @@ export async function extractFromPdf(
     rows: extractedRows,
     headers: headers.filter(Boolean),
     errors: [],
-    warnings: extractedRows.length === 0
-      ? ['PDF parsed but no data rows were extracted.']
-      : warnings,
+    warnings:
+      extractedRows.length === 0
+        ? ['PDF was parsed but no data rows were extracted. Check that the PDF contains a text-based table with numbered rows (1., 2., etc.).']
+        : warnings,
   };
 }
