@@ -17,6 +17,9 @@ import {
   Share2,
   Check,
   AlertCircle,
+  List,
+  ListTree,
+  SquareStack,
 } from 'lucide-react';
 import { publishOrRefreshShare } from '@/lib/share-payload';
 import { useBlueprintStore } from '@/store/blueprint-store';
@@ -25,7 +28,9 @@ import { cn } from '@/lib/utils';
 import { getLaneTitle, L1_HIDDEN_LANE_KEYS, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES } from '@/lib/lane-definitions';
 import { useLibraryStore } from '@/store/library-store';
 import { exportBlueprintPdf, exportBlueprintSvg, visualExportFilename } from '@/lib/export-visual';
+import { exportBlueprintSpreadsheet, spreadsheetExportFilename } from '@/lib/export-spreadsheet';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
+import { activeUserJourney, userJourneyHeading } from '@/lib/user-journey';
 import type { Card, Opportunity } from '@/lib/types';
 import {
   Dialog,
@@ -83,6 +88,8 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const rootBlueprintId = useBlueprintStore((s) => s.rootBlueprintId);
   const storyboardImages = useBlueprintStore((s) => s.storyboardImages);
   const storyboardVisible = useBlueprintStore((s) => s.storyboardVisible);
+  const stepHeadersVisible = useBlueprintStore((s) => s.stepHeadersVisible ?? true);
+  const subStepHeadersVisible = useBlueprintStore((s) => s.subStepHeadersVisible ?? true);
   const storyboardCollapsed = useBlueprintStore((s) => s.storyboardCollapsed);
   const cardLinks = useBlueprintStore((s) => s.cardLinks);
   const evidence = useBlueprintStore((s) => s.evidence);
@@ -91,7 +98,19 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const addStage = useBlueprintStore((s) => s.addStage);
   const toggleLane = useBlueprintStore((s) => s.toggleLane);
   const toggleStoryboardVisible = useBlueprintStore((s) => s.toggleStoryboardVisible);
+  const toggleStepHeadersVisible = useBlueprintStore((s) => s.toggleStepHeadersVisible);
+  const toggleSubStepHeadersVisible = useBlueprintStore((s) => s.toggleSubStepHeadersVisible);
+  const userJourneys = useBlueprintStore((s) => s.userJourneys ?? []);
+  const activeUserJourneyId = useBlueprintStore((s) => s.activeUserJourneyId ?? null);
+  const descriptionVisibleInUserJourney = useBlueprintStore(
+    (s) => s.descriptionVisibleInUserJourney ?? false,
+  );
+  const setActiveUserJourneyId = useBlueprintStore((s) => s.setActiveUserJourneyId);
+  const toggleDescriptionVisibleInUserJourney = useBlueprintStore(
+    (s) => s.toggleDescriptionVisibleInUserJourney,
+  );
   const newBlueprint = useBlueprintStore((s) => s.newBlueprint);
+  const importEcitesLifecycle = useBlueprintStore((s) => s.importEcitesLifecycle);
   const undo = useBlueprintStore((s) => s.undo);
   const redo = useBlueprintStore((s) => s.redo);
   const canUndo = useBlueprintStore((s) => s.canUndo);
@@ -112,9 +131,13 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const saveToLibrary = useLibraryStore((s) => s.save);
 
   const isChildView = Boolean(rootDocument && activeBlueprintId !== rootBlueprintId);
-  const levelLabel = 'Lifecycle';
+  const activeJourney = activeUserJourney(userJourneys, activeUserJourneyId);
+  const boardHeading = activeJourney
+    ? userJourneyHeading(activeJourney)
+    : blueprintTitleLabel(blueprint.serviceName);
   const isL2Mode = false;
   const isL3Mode = false;
+  const useThreeLayerLayout = !isL2Mode && !isL3Mode;
 
   // Show only the lanes relevant to the current view level.
   const dropdownLanes = isL3Mode
@@ -180,6 +203,16 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
     downloadBlob(
       new Blob([pdf], { type: 'application/pdf' }),
       visualExportFilename(state, 'pdf'),
+    );
+    setShowExportDialog(false);
+  };
+
+  const handleExportSpreadsheet = () => {
+    const state = useBlueprintStore.getState();
+    const buffer = exportBlueprintSpreadsheet(state);
+    downloadBlob(
+      new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      spreadsheetExportFilename(state),
     );
     setShowExportDialog(false);
   };
@@ -295,13 +328,39 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
         {/* Blueprint name */}
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="w-fit rounded-full bg-[#E6F3EB] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#008938]">
-              {levelLabel}
-            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveUserJourneyId(null)}
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  !activeUserJourneyId
+                    ? 'bg-[#E6F3EB] text-[#008938]'
+                    : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200',
+                )}
+              >
+                Lifecycle
+              </button>
+              {userJourneys.map((journey) => (
+                <button
+                  key={journey.id}
+                  type="button"
+                  onClick={() => setActiveUserJourneyId(journey.id)}
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                    activeUserJourneyId === journey.id
+                      ? 'bg-[#E6F3EB] text-[#008938]'
+                      : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200',
+                  )}
+                >
+                  {journey.name}
+                </button>
+              ))}
+            </div>
             <h1 className="m-0 min-w-0 w-full text-xl font-bold leading-tight">
-              {readOnly ? (
+              {readOnly || activeJourney ? (
                 <span className="block w-full max-w-full break-words px-1 py-0.5 text-xl font-bold text-neutral-900">
-                  {blueprintTitleLabel(blueprint.serviceName)}
+                  {boardHeading}
                 </span>
               ) : editingName ? (
                 <input
@@ -326,10 +385,10 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                     setName(blueprintTitleLabel(blueprint.serviceName));
                     setEditingName(true);
                   }}
-                  aria-label={`Blueprint name: ${blueprintTitleLabel(blueprint.serviceName)}. Click to edit.`}
+                  aria-label={`Blueprint name: ${boardHeading}. Click to edit.`}
                   className="block w-full max-w-full text-left break-words rounded px-1 py-0.5 text-xl font-bold text-neutral-900 transition-colors hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
-                  {blueprintTitleLabel(blueprint.serviceName)}
+                  {boardHeading}
                 </button>
               )}
             </h1>
@@ -432,8 +491,84 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                       {isL3Mode ? 'Screens' : 'Storyboard'}
                     </span>
                   </button>
+                  {activeUserJourneyId && (
+                    <button
+                      role="menuitem"
+                      onClick={toggleDescriptionVisibleInUserJourney}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      {descriptionVisibleInUserJourney ? (
+                        <Eye aria-hidden="true" className="h-3.5 w-3.5 text-neutral-600" />
+                      ) : (
+                        <EyeOff aria-hidden="true" className="h-3.5 w-3.5 text-neutral-300" />
+                      )}
+                      <List aria-hidden="true" className="h-3.5 w-3.5 text-neutral-500" />
+                      <span
+                        className={cn(
+                          'font-medium',
+                          !descriptionVisibleInUserJourney && 'text-neutral-500',
+                        )}
+                      >
+                        Description
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    role="menuitem"
+                    onClick={toggleStepHeadersVisible}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    {stepHeadersVisible ? (
+                      <Eye aria-hidden="true" className="h-3.5 w-3.5 text-neutral-600" />
+                    ) : (
+                      <EyeOff aria-hidden="true" className="h-3.5 w-3.5 text-neutral-300" />
+                    )}
+                    <List aria-hidden="true" className="h-3.5 w-3.5 text-neutral-500" />
+                    <span className={cn('font-medium', !stepHeadersVisible && 'text-neutral-500')}>
+                      Steps
+                    </span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={toggleSubStepHeadersVisible}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    {subStepHeadersVisible ? (
+                      <Eye aria-hidden="true" className="h-3.5 w-3.5 text-neutral-600" />
+                    ) : (
+                      <EyeOff aria-hidden="true" className="h-3.5 w-3.5 text-neutral-300" />
+                    )}
+                    <ListTree aria-hidden="true" className="h-3.5 w-3.5 text-neutral-500" />
+                    <span className={cn('font-medium', !subStepHeadersVisible && 'text-neutral-500')}>
+                      Sub-steps
+                    </span>
+                  </button>
+                  {useThreeLayerLayout && subStepHeadersVisible && (
+                    <button
+                      role="menuitem"
+                      onClick={() => toggleLane('sub_sub_step')}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      {lanes.find((l) => l.key === 'sub_sub_step')?.visible !== false ? (
+                        <Eye aria-hidden="true" className="h-3.5 w-3.5 text-neutral-600" />
+                      ) : (
+                        <EyeOff aria-hidden="true" className="h-3.5 w-3.5 text-neutral-300" />
+                      )}
+                      <SquareStack aria-hidden="true" className="h-3.5 w-3.5 text-neutral-500" />
+                      <span
+                        className={cn(
+                          'font-medium',
+                          lanes.find((l) => l.key === 'sub_sub_step')?.visible === false && 'text-neutral-500',
+                        )}
+                      >
+                        Sub-sub-steps
+                      </span>
+                    </button>
+                  )}
                   <div className="my-1 h-px bg-neutral-100" />
-                  {dropdownLanes.map((lane) => (
+                  {dropdownLanes
+                    .filter((lane) => lane.key !== 'sub_sub_step')
+                    .map((lane) => (
                     <button
                       key={lane.key}
                       role="menuitem"
@@ -501,6 +636,24 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                       </button>
                       <div className="my-1 h-px bg-neutral-100" />
                     </>
+                  )}
+                  {!readOnly && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            'Replace stages, steps, and sub-steps from the CITES service blueprint spreadsheet? Lane cards will refresh; storyboard images you added are kept.',
+                          )
+                        ) {
+                          importEcitesLifecycle();
+                        }
+                        setShowMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      <Target aria-hidden="true" className="h-3.5 w-3.5" /> Import eCITES lifecycle
+                    </button>
                   )}
                   {!readOnly && (
                     <button
@@ -589,10 +742,20 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
           <DialogHeader>
             <DialogTitle>Export blueprint</DialogTitle>
             <DialogDescription>
-              Choose a visual export format for the full board.
+              Choose an export format for the full board.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={handleExportSpreadsheet}
+              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:col-span-2"
+            >
+              <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
+              <span className="text-xs leading-5 text-neutral-500">
+                Excel file with all stages, steps, sub-steps, lanes and card content.
+              </span>
+            </button>
             <button
               type="button"
               onClick={handleExportSvg}

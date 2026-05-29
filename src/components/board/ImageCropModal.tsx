@@ -228,7 +228,7 @@ export function ImageCropModal({
 
         {!imageSrc ? (
           <div className="flex flex-col items-center gap-4 py-6">
-            <p className="text-sm text-neutral-500">
+            <p className="text-center text-sm text-neutral-500">
               Upload a photo, screenshot, or take one with your camera
               {onGenerateWithAI ? ', or generate with AI.' : '.'}
             </p>
@@ -249,6 +249,14 @@ export function ImageCropModal({
                 <Camera className="mr-1.5 h-4 w-4" />
                 Camera
               </Button>
+            </div>
+            <div className="w-full max-w-sm rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-left">
+              <p className="text-xs font-medium text-neutral-700">Recommended size</p>
+              <p className="mt-1 text-xs leading-5 text-neutral-600">
+                Use <strong className="font-medium text-neutral-700">480 × 320 pixels</strong> (3:2
+                landscape) so images line up neatly across the row. GOV.UK page screenshots work well
+                as PNG. Full-page or tall screens are fine — the row will grow to fit.
+              </p>
             </div>
             {onGenerateWithAI && (
               <>

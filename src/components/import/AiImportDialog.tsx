@@ -47,6 +47,11 @@ import { extractFromPdf } from '@/lib/import/extract-pdf';
 import { MockImportMappingService } from '@/lib/import/mock-mapping-service';
 import type { MappedRow, RowRecordType, ReviewStatus } from '@/lib/import/mapping-types';
 import { commitMappedRows } from '@/lib/import/commit';
+import {
+  applyCitesBlueprintImport,
+  detectCitesBlueprintMatrix,
+  parseCitesBlueprintRaw,
+} from '@/lib/import/cites-matrix';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { LANE_KEYS, type LaneKey } from '@/lib/types';
 import { LANE_TITLE_MAP } from '@/lib/lane-definitions';
@@ -463,6 +468,23 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
 
       if (ext === 'csv') {
         const text = await file.text();
+        const rawMatrix = parseCitesBlueprintRaw(text);
+        if (detectCitesBlueprintMatrix(rawMatrix)) {
+          try {
+            const current = useBlueprintStore.getState().getPersistableDocument();
+            const merged = applyCitesBlueprintImport(current, text, file.name);
+            setServiceName(merged.blueprint.serviceName);
+            setCommittedCardCount(merged.cards.length);
+            setCommittedStageCount(merged.stages.length);
+            replaceActiveBlueprint(merged);
+            setStep('done');
+          } catch (err) {
+            setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
+            setMappedRows([]);
+            setStep('review');
+          }
+          return;
+        }
         const extraction = extractFromCsv(text, file.name);
         setExtractedRows(extraction.rows);
         await runMapping(extraction.rows);
@@ -485,7 +507,29 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
         }
 
         if (visibleSheets.length === 1) {
-          const extraction = extractFromXlsx(wb, visibleSheets[0].name, file.name);
+          const sheetName = visibleSheets[0].name;
+          const ws = wb.Sheets[sheetName];
+          const rawMatrix = ws
+            ? (XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][])
+            : [];
+          if (detectCitesBlueprintMatrix(rawMatrix)) {
+            try {
+              const csvText = XLSX.utils.sheet_to_csv(ws!);
+              const current = useBlueprintStore.getState().getPersistableDocument();
+              const merged = applyCitesBlueprintImport(current, csvText, file.name);
+              setServiceName(merged.blueprint.serviceName);
+              setCommittedCardCount(merged.cards.length);
+              setCommittedStageCount(merged.stages.length);
+              replaceActiveBlueprint(merged);
+              setStep('done');
+            } catch (err) {
+              setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
+              setMappedRows([]);
+              setStep('review');
+            }
+            return;
+          }
+          const extraction = extractFromXlsx(wb, sheetName, file.name);
           setExtractedRows(extraction.rows);
           await runMapping(extraction.rows);
         } else {
@@ -524,11 +568,32 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
       if (!workbook) return;
       setStep('extracting');
       await new Promise((r) => setTimeout(r, 80));
+      const ws = workbook.Sheets[sheetName];
+      const rawMatrix = ws
+        ? (XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][])
+        : [];
+      if (detectCitesBlueprintMatrix(rawMatrix)) {
+        try {
+          const csvText = XLSX.utils.sheet_to_csv(ws!);
+          const current = useBlueprintStore.getState().getPersistableDocument();
+          const merged = applyCitesBlueprintImport(current, csvText, fileName);
+          setServiceName(merged.blueprint.serviceName);
+          setCommittedCardCount(merged.cards.length);
+          setCommittedStageCount(merged.stages.length);
+          replaceActiveBlueprint(merged);
+          setStep('done');
+        } catch (err) {
+          setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
+          setMappedRows([]);
+          setStep('review');
+        }
+        return;
+      }
       const extraction = extractFromXlsx(workbook, sheetName, fileName);
       setExtractedRows(extraction.rows);
       await runMapping(extraction.rows);
     },
-    [workbook, fileName, runMapping],
+    [workbook, fileName, runMapping, replaceActiveBlueprint],
   );
 
   // ── Row editing ───────────────────────────────────────────────────────────

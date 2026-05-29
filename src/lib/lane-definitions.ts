@@ -1,28 +1,11 @@
 import { type LaneDefinition, type LaneKey } from './types';
 
 export const DEFAULT_LANES: LaneDefinition[] = [
+  { key: 'sub_sub_step', title: 'Sub-sub-steps', order: -1, visible: true, collapsed: false },
   { key: 'actor', title: 'Actor', order: 0, visible: true, collapsed: false },
-  { key: 'user_action_event', title: 'User action', order: 1, visible: true, collapsed: false },
+  { key: 'system', title: 'Systems', order: 1, visible: true, collapsed: false },
   { key: 'user_need', title: 'User need', order: 2, visible: true, collapsed: false },
   { key: 'pain_point', title: 'Pain point', order: 3, visible: true, collapsed: false },
-  { key: 'frontstage_touchpoint', title: 'Frontstage touchpoint', order: 4, visible: true, collapsed: false },
-  { key: 'activity', title: 'Activity', order: 5, visible: false, collapsed: false },
-  { key: 'backstage_process', title: 'Backstage process', order: 6, visible: true, collapsed: false },
-  { key: 'description', title: 'Description', order: 7, visible: false, collapsed: false },
-  { key: 'behaviour_change', title: 'Desired behaviour change', order: 8, visible: false, collapsed: false },
-  { key: 'success_measure', title: 'Success measure', order: 9, visible: false, collapsed: false },
-  { key: 'motivation', title: 'Motivation', order: 10, visible: false, collapsed: false },
-  { key: 'ability', title: 'Ability', order: 11, visible: false, collapsed: false },
-  { key: 'prompts', title: 'Prompts', order: 12, visible: false, collapsed: false },
-  { key: 'system', title: 'System', order: 13, visible: true, collapsed: false },
-  { key: 'policy_intent', title: 'Policy reform', order: 14, visible: false, collapsed: false },
-  { key: 'business_rule', title: 'Business rule', order: 15, visible: false, collapsed: false },
-  { key: 'data_input', title: 'Data input', order: 16, visible: false, collapsed: false },
-  { key: 'data_output', title: 'Data output', order: 17, visible: false, collapsed: false },
-  { key: 'backstage_actor', title: 'Backstage actor', order: 18, visible: false, collapsed: false },
-  { key: 'shared_services', title: 'Shared services', order: 19, visible: false, collapsed: false },
-  { key: 'opportunities', title: 'Opportunities', order: 20, visible: true, collapsed: false },
-  { key: 'ideas', title: 'Ideas', order: 21, visible: true, collapsed: false },
 ];
 
 /**
@@ -121,9 +104,31 @@ export const L3_INSIGHT_LANE_KEYS = new Set<LaneKey>([
   'user_need',
 ]);
 
-export const LANE_TITLE_MAP = Object.fromEntries(
-  [...DEFAULT_LANES, ...L1_MACRO_LANES].map((lane) => [lane.key, lane.title]),
-) as Record<LaneDefinition['key'], string>;
+export const LANE_TITLE_MAP = {
+  ...Object.fromEntries(
+    [...DEFAULT_LANES, ...L1_MACRO_LANES].map((lane) => [lane.key, lane.title]),
+  ),
+  // Retired lifecycle lanes (legacy cards and imports)
+  user_action_event: 'User action',
+  frontstage_touchpoint: 'Frontstage touchpoint',
+  activity: 'Activity',
+  backstage_process: 'Backstage process',
+  description: 'Description',
+  behaviour_change: 'Desired behaviour change',
+  success_measure: 'Success measure',
+  motivation: 'Motivation',
+  ability: 'Ability',
+  prompts: 'Prompts',
+  system: 'Systems',
+  policy_intent: 'Policy reform',
+  business_rule: 'Business rule',
+  data_input: 'Data input',
+  data_output: 'Data output',
+  backstage_actor: 'Backstage actor',
+  shared_services: 'Shared services',
+  opportunities: 'Opportunities',
+  ideas: 'Ideas',
+} as Record<LaneDefinition['key'], string>;
 
 export function getLaneTitle(key: LaneDefinition['key']): string {
   return LANE_TITLE_MAP[key];

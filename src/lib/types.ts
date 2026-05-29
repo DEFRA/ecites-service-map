@@ -21,7 +21,7 @@ export interface Stage {
   traceabilityCode?: string;
   /** Optional phase grouping, e.g. "Production", "Consumption", "Waste management". */
   phase?: string;
-  /** Optional description shown as a sub-header row below the stage title. */
+  /** Shown in the description row below the storyboard when only stages are visible. */
   description?: string;
 }
 
@@ -33,6 +33,22 @@ export interface Step {
   order: number;
   /** Human-readable traceability code, e.g. SS-007. Assigned once on creation; never regenerated. */
   traceabilityCode?: string;
+  /** Shown in the description row below the storyboard when steps are visible. */
+  description?: string;
+}
+
+/** Third hierarchy level in L1 lifecycle blueprints. Cards attach to sub-steps. */
+export interface SubStep {
+  id: string;
+  blueprintId: string;
+  stageId: string;
+  stepId: string;
+  title: string;
+  order: number;
+  /** Human-readable traceability code, e.g. SBS-007. Assigned once on creation; never regenerated. */
+  traceabilityCode?: string;
+  /** Shown in the description row below the storyboard when sub-steps are visible. */
+  description?: string;
 }
 
 export interface LaneDefinition {
@@ -89,6 +105,8 @@ export interface Card {
   blueprintId: string;
   stageId: string;
   stepId: string;
+  /** Leaf column in L1 three-layer blueprints. When set, stepId is the parent step. */
+  subStepId?: string;
   laneKey: LaneKey;
   title: string;
   body: string;
@@ -136,6 +154,7 @@ export const LANE_KEYS = [
   'shared_services',
   'opportunities',
   'ideas',
+  'sub_sub_step',
   // L1 Macro lanes
   'policy_outcome',
   'user_outcome',
@@ -153,7 +172,17 @@ export type LaneKey = (typeof LANE_KEYS)[number];
 export interface StoryboardImage {
   id: string;
   blueprintId: string;
-  stepId: string;
+  /** Stage-level storyboard (stage-only column view). */
+  stageId?: string;
+  /** Step-level storyboard (step column view). Legacy records use this alone. */
+  stepId?: string;
+  /** Sub-step-level storyboard (sub-step column view). */
+  subStepId?: string;
+  /**
+   * Stable column identity (stage::step::sub-step titles) so images survive
+   * structure imports that replace UUIDs.
+   */
+  columnKey?: string;
   dataUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -354,6 +383,23 @@ export interface StrategicGoal {
   updatedAt: string;
 }
 
+/** Per-column story content for a user journey (from spreadsheet JOURNEYS section). */
+export interface UserJourneyColumnContent {
+  storyTitle: string;
+  narrative: string;
+  detail: string;
+}
+
+/** A named user journey spanning selected sub-step columns. */
+export interface UserJourney {
+  id: string;
+  name: string;
+  /** Sub-step column ids included in this journey (spreadsheet x marks). */
+  subStepIds: string[];
+  /** Story content keyed by subStepId. */
+  columns: Record<string, UserJourneyColumnContent>;
+}
+
 export interface Outcome {
   id: string;
   blueprintId: string;
@@ -378,6 +424,8 @@ export interface BlueprintState {
   blueprint: Blueprint;
   stages: Stage[];
   steps: Step[];
+  /** Third hierarchy level for L1 lifecycle blueprints. Optional for backward compatibility. */
+  subSteps?: SubStep[];
   lanes: LaneDefinition[];
   childBlueprints: BlueprintState[];
   /** Root board snapshot while a child journey is open. Null/undefined when viewing the root board. */
@@ -390,6 +438,19 @@ export interface BlueprintState {
   storyboardImages: StoryboardImage[];
   storyboardVisible: boolean;
   storyboardCollapsed: boolean;
+  /** Show the steps header row beneath stages. */
+  stepHeadersVisible: boolean;
+  /** Show the sub-steps header row (lifecycle three-layer boards). */
+  subStepHeadersVisible: boolean;
+  /** When set, only sub-step columns with this actor card title are shown (null = all). */
+  actorJourneyFilter?: string | null;
+  systemJourneyFilter?: string | null;
+  /** User journeys parsed from the spreadsheet JOURNEYS section. */
+  userJourneys?: UserJourney[];
+  /** When set, the board shows only columns in this user journey. */
+  activeUserJourneyId?: string | null;
+  /** When a user journey is active, show the hierarchy description row if true. */
+  descriptionVisibleInUserJourney?: boolean;
   cardLinks: CardLink[];
   evidence: Evidence[];
   opportunities: Opportunity[];

@@ -3,6 +3,11 @@ import * as XLSX from 'xlsx';
 import { type ImportResult } from '../types';
 import { validateHeaders, normalizeHeaders } from './validate';
 import { normalizeImportRows, normalizeMuralExport, normalizeSwimlaneMatrix, detectFormat, normalizeMultiTabBlueprint } from './normalize';
+import {
+  detectCitesBlueprintMatrix,
+  normalizeCitesBlueprintMatrix,
+  parseCitesBlueprintRaw,
+} from './cites-matrix';
 
 export interface SheetInfo {
   name: string;
@@ -65,16 +70,21 @@ export function processXlsxSheet(
   const ws = workbook.Sheets[sheetName];
   if (!ws) {
     return {
-      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
       errors: [{ row: 0, field: 'sheet', message: `Sheet "${sheetName}" not found` }],
       warnings: [],
     };
   }
 
+  const rawMatrix = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][];
+  if (detectCitesBlueprintMatrix(rawMatrix)) {
+    return normalizeCitesBlueprintMatrix(rawMatrix, fileName, sheetName);
+  }
+
   const { headers, rows } = xlsxSheetToRows(ws);
   if (headers.length === 0) {
     return {
-      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
       errors: [{ row: 0, field: 'headers', message: 'No headers found in sheet' }],
       warnings: [],
     };
@@ -95,7 +105,7 @@ export function processXlsxSheet(
     const headerErrors = validateHeaders(normalizedHeaders);
     if (headerErrors.length > 0) {
       return {
-        state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+        state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
         errors: headerErrors,
         warnings: [],
       };
@@ -114,13 +124,18 @@ export function processXlsxSheet(
   }
 
   return {
-    state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+    state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
     errors: [{ row: 0, field: 'format', message: 'Unrecognized spreadsheet format. Expected template (record_type, lane_key) or Mural export (Swim Lane Label, Stage Label) columns.' }],
     warnings: [],
   };
 }
 
 export function parseCsv(text: string, fileName: string): ImportResult {
+  const rawMatrix = parseCitesBlueprintRaw(text);
+  if (detectCitesBlueprintMatrix(rawMatrix)) {
+    return normalizeCitesBlueprintMatrix(rawMatrix, fileName, 'CSV');
+  }
+
   const result = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: true,
@@ -129,7 +144,7 @@ export function parseCsv(text: string, fileName: string): ImportResult {
 
   if (result.errors.length > 0) {
     return {
-      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
       errors: result.errors.map((e, i) => ({ row: e.row ?? i, field: 'csv', message: e.message })),
       warnings: [],
     };
@@ -149,7 +164,7 @@ export function parseCsv(text: string, fileName: string): ImportResult {
   const headerErrors = validateHeaders(headers);
   if (headerErrors.length > 0) {
     return {
-      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
+      state: { blueprint: { id: '', serviceName: '', description: '', createdAt: '', updatedAt: '' }, stages: [], steps: [], lanes: [], childBlueprints: [], rootDocument: null, activeBlueprintId: '', rootBlueprintId: '', cards: [], storyboardImages: [], storyboardVisible: true, storyboardCollapsed: false, stepHeadersVisible: true, subStepHeadersVisible: true, cardLinks: [], evidence: [], opportunities: [], solutions: [], assumptions: [], strategicGoals: [], outcomes: [], systemOutcomes: [], behaviourOutcomes: [], serviceOutcomes: [], stepLinks: [], requirements: [], apiContracts: [], uiScaffolds: [], traceabilityCounters: {} },
       errors: headerErrors,
       warnings: [],
     };

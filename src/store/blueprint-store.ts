@@ -22,12 +22,14 @@ import {
   type SolutionStatus,
   type Stage,
   type Step,
+  type SubStep,
   type StepLink,
   type StoryboardImage,
   type UiScaffold,
   type StrategicGoal,
   type Outcome,
 } from '@/lib/types';
+import type { StoryboardAttachTarget } from '@/lib/storyboard-images';
 import { useLibraryStore } from '@/store/library-store';
 import {
   createRequirementFromOpportunity,
@@ -36,6 +38,9 @@ import {
 } from '@/lib/traceability/downstream';
 import { DEFAULT_LANES, L1_MACRO_LANES, L1_MACRO_LANE_KEYS, L3_LANE_KEYS } from '@/lib/lane-definitions';
 import { createSeedBlueprint } from '@/lib/seed-data';
+import { loadBundledCitesBlueprint, repairStaleCitesBlueprint } from '@/lib/import/cites-matrix';
+import { buildEcitesLifecycleEntities } from '@/lib/ecites-lifecycle-data';
+import { relinkOrphanedStoryboardImages, storyboardColumnKey } from '@/lib/storyboard-images';
 import { getLanePrefix } from '@/lib/traceability/registry';
 import { generateTraceabilityCode } from '@/lib/traceability/service';
 
@@ -77,6 +82,10 @@ function saveToStorage(state: BlueprintState) {
   } catch (e) {
     console.warn('[service-blueprint] Could not save to localStorage (quota or private mode).', e);
   }
+}
+
+function isL1Blueprint(state: BlueprintState): boolean {
+  return (state.lanes ?? []).some((lane) => L1_MACRO_LANE_KEYS.has(lane.key));
 }
 
 function pickBaseLanes(state: BlueprintState) {
@@ -381,6 +390,56 @@ function normalizeChildTreeNode(child: BlueprintState, parent: BlueprintState): 
   };
 }
 
+function migrateSubSteps(state: BlueprintState): BlueprintState {
+  const existing = state.subSteps ?? [];
+  if (existing.length > 0) {
+    return { ...state, subSteps: existing };
+  }
+
+  const hasL1 = (state.lanes ?? []).some((l) => L1_MACRO_LANE_KEYS.has(l.key));
+  if (!hasL1 || (state.steps ?? []).length === 0) {
+    return { ...state, subSteps: [] };
+  }
+
+  let counters = { ...(state.traceabilityCounters ?? {}) };
+  const subSteps: SubStep[] = [];
+  const subStepByStepId = new Map<string, SubStep>();
+
+  for (const step of state.steps) {
+    const { code, updatedCounters } = generateTraceabilityCode('SBS', counters);
+    counters = updatedCounters;
+    const subStep: SubStep = {
+      id: uuid(),
+      blueprintId: step.blueprintId,
+      stageId: step.stageId,
+      stepId: step.id,
+      title: step.title,
+      order: 0,
+      traceabilityCode: code,
+    };
+    subSteps.push(subStep);
+    subStepByStepId.set(step.id, subStep);
+  }
+
+  const cards = (state.cards ?? []).map((card) => {
+    if (card.subStepId) return card;
+    const subStep = subStepByStepId.get(card.stepId);
+    if (!subStep) return card;
+    return { ...card, subStepId: subStep.id };
+  });
+
+  return { ...state, subSteps, cards, traceabilityCounters: counters };
+}
+
+/** Re-attach storyboard images when column UUIDs changed but titles still match. */
+function repairStoryboardAttachments(state: BlueprintState): BlueprintState {
+  const images = state.storyboardImages ?? [];
+  if (images.length === 0) return state;
+  const stub = buildEcitesLifecycleEntities(state.blueprint.id);
+  const relinked = relinkOrphanedStoryboardImages(state, stub);
+  return { ...state, storyboardImages: relinked };
+}
+
 function normalizeState(state: BlueprintState): BlueprintState {
   const lanesByKey = new Map(state.lanes.map((lane) => [lane.key, lane]));
   const baseLanes = pickBaseLanes(state);
@@ -394,6 +453,13 @@ function normalizeState(state: BlueprintState): BlueprintState {
     storyboardImages: state.storyboardImages ?? [],
     storyboardVisible: state.storyboardVisible ?? true,
     storyboardCollapsed: state.storyboardCollapsed ?? false,
+    stepHeadersVisible: state.stepHeadersVisible ?? true,
+    subStepHeadersVisible: state.subStepHeadersVisible ?? true,
+    actorJourneyFilter: state.actorJourneyFilter ?? null,
+    systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userJourneys: state.userJourneys ?? [],
+    activeUserJourneyId: state.activeUserJourneyId ?? null,
+    descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     cardLinks: state.cardLinks ?? [],
     evidence: state.evidence ?? [],
     opportunities: state.opportunities ?? [],
@@ -426,26 +492,34 @@ function normalizeState(state: BlueprintState): BlueprintState {
   // Backfill traceability codes for any stage/step/card that was loaded without one.
   // This covers seed data and blueprints imported before codes were introduced.
   // Entities that already have a code are skipped — codes are never overwritten.
-  let counters = { ...base.traceabilityCounters };
+  const migrated = migrateSubSteps({ ...base, subSteps: base.subSteps ?? [] });
+  let counters = { ...migrated.traceabilityCounters };
 
-  const stages = base.stages.map((stage) => {
+  const stages = migrated.stages.map((stage) => {
     if (stage.traceabilityCode) return stage;
     const { code, updatedCounters } = generateTraceabilityCode('ST', counters);
     counters = updatedCounters;
     return { ...stage, traceabilityCode: code };
   });
 
-  const steps = base.steps.map((step) => {
+  const steps = migrated.steps.map((step) => {
     if (step.traceabilityCode) return step;
     const { code, updatedCounters } = generateTraceabilityCode('SS', counters);
     counters = updatedCounters;
     return { ...step, traceabilityCode: code };
   });
 
+  const subSteps = (migrated.subSteps ?? []).map((subStep) => {
+    if (subStep.traceabilityCode) return subStep;
+    const { code, updatedCounters } = generateTraceabilityCode('SBS', counters);
+    counters = updatedCounters;
+    return { ...subStep, traceabilityCode: code };
+  });
+
   const cards = removeEvidenceReferencePainPointCards(
     removeAreaReferenceBehaviourChangeCards(
       migrateStandaloneBehaviourChangeRollupCards(
-        expandMergedTypedTraceableCards(base.cards).map((originalCard) => {
+        expandMergedTypedTraceableCards(migrated.cards).map((originalCard) => {
           const card = stripBehaviourChangeEvidenceBasis(
             stripRollupText(stripOpportunityTraceText(sanitizeTypedTraceableLaneCard(originalCard))),
           );
@@ -461,10 +535,11 @@ function normalizeState(state: BlueprintState): BlueprintState {
   );
 
   return {
-    ...base,
-    lanes: base.lanes,
+    ...migrated,
+    lanes: migrated.lanes,
     stages,
     steps,
+    subSteps,
     cards,
     traceabilityCounters: counters,
   };
@@ -507,6 +582,8 @@ interface BlueprintStore extends BlueprintState {
   /** Retroactively assigns a traceability code to an existing entity that doesn't have one yet. */
   assignTraceabilityCode: (entityId: string, entityType: 'stage' | 'step' | 'card' | 'evidence' | 'opportunity') => string | null;
   loadSeed: () => void;
+  /** Replace stages, steps, and sub-steps with the eCITES lifecycle structure. */
+  importEcitesLifecycle: () => void;
 
   // Stages
   addStage: (title: string) => void;
@@ -516,8 +593,10 @@ interface BlueprintStore extends BlueprintState {
   reorderStage: (id: string, newOrder: number) => void;
 
   // Steps
+  /** Creates a default step for a stage that has none (idempotent). Returns the step id, or null if the stage is missing. */
+  ensureDefaultStepForStage: (stageId: string) => string | null;
   addStep: (stageId: string, title: string) => void;
-  updateStep: (id: string, patch: Partial<Pick<Step, 'title'>>) => void;
+  updateStep: (id: string, patch: Partial<Pick<Step, 'title' | 'description'>>) => void;
   deleteStep: (id: string) => void;
   reorderStep: (id: string, newOrder: number) => void;
 
@@ -527,8 +606,16 @@ interface BlueprintStore extends BlueprintState {
   toggleLaneCollapsed: (key: LaneKey) => void;
 
 
+  /** Creates a default sub-step for a step that has none (idempotent). Returns the sub-step id, or null if the step is missing. */
+  ensureDefaultSubStepForStep: (stepId: string) => string | null;
+  addSubStep: (stepId: string, title: string) => void;
+  updateSubStep: (id: string, patch: Partial<Pick<SubStep, 'title' | 'description'>>) => void;
+  deleteSubStep: (id: string) => void;
+  reorderSubStep: (id: string, newOrder: number) => void;
+
   // Cards
   addCard: (stepId: string, laneKey: LaneKey, title: string, body?: string, tags?: string[]) => void;
+  addCardToSubStep: (subStepId: string, laneKey: LaneKey, title: string, body?: string, tags?: string[]) => void;
   updateCard: (id: string, patch: Partial<Pick<Card, 'title' | 'body' | 'tags' | 'owner' | 'status' | 'notes'>>) => void;
   deleteCard: (id: string) => void;
   moveCard: (cardId: string, toStepId: string, toLaneKey: LaneKey, toOrder: number) => void;
@@ -548,11 +635,21 @@ interface BlueprintStore extends BlueprintState {
   deleteEvidence: (id: string) => void;
 
   // Storyboard (multiple images per step)
-  addStoryboardImage: (stepId: string, dataUrl: string) => string;
+  addStoryboardImage: (target: StoryboardAttachTarget, dataUrl: string) => string;
   updateStoryboardImage: (id: string, dataUrl: string) => void;
   removeStoryboardImage: (id: string) => void;
   toggleStoryboardVisible: () => void;
   toggleStoryboardCollapsed: () => void;
+  toggleStepHeadersVisible: () => void;
+  toggleSubStepHeadersVisible: () => void;
+  /** Filter visible sub-step columns to those with a matching actor card (null = all). */
+  setActorJourneyFilter: (filter: string | null) => void;
+  /** Filter visible sub-step columns to those with a matching system card (null = all). */
+  setSystemJourneyFilter: (filter: string | null) => void;
+  /** Switch between full lifecycle view and a user journey from the spreadsheet. */
+  setActiveUserJourneyId: (journeyId: string | null) => void;
+  /** Show or hide the hierarchy description row while a user journey is active. */
+  toggleDescriptionVisibleInUserJourney: () => void;
 
   // Opportunities (persisted)
   addOpportunity: (data: Omit<Opportunity, 'id' | 'blueprintId' | 'createdAt' | 'updatedAt'>) => string;
@@ -615,6 +712,7 @@ interface BlueprintStore extends BlueprintState {
   getLiveDocumentSnapshot: () => BlueprintState;
   getStepsForStage: (stageId: string) => Step[];
   getCardsForCell: (stepId: string, laneKey: LaneKey) => Card[];
+  getCardsForSubStepCell: (subStepId: string, laneKey: LaneKey) => Card[];
 }
 
 function emptyBlueprint(): BlueprintState {
@@ -624,6 +722,7 @@ function emptyBlueprint(): BlueprintState {
     blueprint: { id, serviceName: 'Untitled Blueprint', description: '', createdAt: ts, updatedAt: ts },
     stages: [],
     steps: [],
+    subSteps: [],
     lanes: DEFAULT_LANES.map(l => ({ ...l })),
     childBlueprints: [],
     rootDocument: null,
@@ -633,6 +732,13 @@ function emptyBlueprint(): BlueprintState {
     storyboardImages: [],
     storyboardVisible: true,
     storyboardCollapsed: false,
+    stepHeadersVisible: true,
+    subStepHeadersVisible: true,
+    actorJourneyFilter: null,
+    systemJourneyFilter: null,
+    userJourneys: [],
+    activeUserJourneyId: null,
+    descriptionVisibleInUserJourney: false,
     cardLinks: [],
     evidence: [],
     opportunities: [],
@@ -660,6 +766,7 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     blueprint: bp,
     stages: state.stages,
     steps: state.steps,
+    subSteps: state.subSteps ?? [],
     lanes: state.lanes,
     childBlueprints: state.childBlueprints ?? [],
     rootDocument: state.rootDocument ?? null,
@@ -669,6 +776,17 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     storyboardImages: state.storyboardImages,
     storyboardVisible: state.storyboardVisible,
     storyboardCollapsed: state.storyboardCollapsed,
+    stepHeadersVisible: state.stepHeadersVisible ?? true,
+    subStepHeadersVisible: state.subStepHeadersVisible ?? true,
+    actorJourneyFilter: state.actorJourneyFilter ?? null,
+    systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userJourneys: (state.userJourneys ?? []).map((journey) => ({
+      ...journey,
+      subStepIds: [...journey.subStepIds],
+      columns: { ...journey.columns },
+    })),
+    activeUserJourneyId: state.activeUserJourneyId ?? null,
+    descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     cardLinks: state.cardLinks,
     evidence: state.evidence,
     opportunities: state.opportunities,
@@ -737,6 +855,7 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     blueprint: { ...bp },
     stages: (state.stages ?? []).map((stage) => ({ ...stage })),
     steps: (state.steps ?? []).map((step) => ({ ...step })),
+    subSteps: (state.subSteps ?? []).map((subStep) => ({ ...subStep })),
     lanes: (state.lanes ?? []).map((lane) => ({ ...lane })),
     childBlueprints: (state.childBlueprints ?? []).map((child) => cloneDocumentState(child)),
     rootDocument: state.rootDocument ? cloneDocumentState(state.rootDocument) : null,
@@ -751,6 +870,17 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     storyboardImages: (state.storyboardImages ?? []).map((img) => ({ ...img })),
     storyboardVisible: state.storyboardVisible ?? true,
     storyboardCollapsed: state.storyboardCollapsed ?? false,
+    stepHeadersVisible: state.stepHeadersVisible ?? true,
+    subStepHeadersVisible: state.subStepHeadersVisible ?? true,
+    actorJourneyFilter: state.actorJourneyFilter ?? null,
+    systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userJourneys: (state.userJourneys ?? []).map((journey) => ({
+      ...journey,
+      subStepIds: [...journey.subStepIds],
+      columns: { ...journey.columns },
+    })),
+    activeUserJourneyId: state.activeUserJourneyId ?? null,
+    descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     cardLinks: (state.cardLinks ?? []).map((l) => ({ ...l })),
     evidence: (state.evidence ?? []).map((e) => ({ ...e })),
     opportunities: (state.opportunities ?? []).map((o) => ({
@@ -857,6 +987,7 @@ function persist(state: BlueprintState) {
     blueprint: forDisk.blueprint,
     stages: forDisk.stages,
     steps: forDisk.steps,
+    subSteps: forDisk.subSteps ?? [],
     lanes: forDisk.lanes,
     childBlueprints: forDisk.childBlueprints ?? [],
     rootDocument: forDisk.rootDocument ?? null,
@@ -866,6 +997,13 @@ function persist(state: BlueprintState) {
     storyboardImages: forDisk.storyboardImages,
     storyboardVisible: forDisk.storyboardVisible,
     storyboardCollapsed: forDisk.storyboardCollapsed,
+    stepHeadersVisible: forDisk.stepHeadersVisible ?? true,
+    subStepHeadersVisible: forDisk.subStepHeadersVisible ?? true,
+    actorJourneyFilter: forDisk.actorJourneyFilter ?? null,
+    systemJourneyFilter: forDisk.systemJourneyFilter ?? null,
+    userJourneys: forDisk.userJourneys ?? [],
+    activeUserJourneyId: forDisk.activeUserJourneyId ?? null,
+    descriptionVisibleInUserJourney: forDisk.descriptionVisibleInUserJourney ?? false,
     cardLinks: forDisk.cardLinks,
     evidence: forDisk.evidence,
     opportunities: forDisk.opportunities,
@@ -896,12 +1034,14 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
 
   hydrate: () => {
     const raw = loadFromStorage() ?? emptyBlueprint();
+    const repaired = repairStaleCitesBlueprint(raw);
+    const withStoryboard = repairStoryboardAttachments(repaired);
     // normalizeState backfills any missing traceability codes (among other defaults).
     // If a previous session saved an incompatible import shape, recover to a
     // blank board instead of leaving the app on a client-side blank screen.
     let normalized: BlueprintState;
     try {
-      normalized = normalizeState(raw);
+      normalized = normalizeState(withStoryboard);
     } catch (error) {
       console.error('Failed to hydrate saved blueprint state', error);
       normalized = normalizeState(emptyBlueprint());
@@ -1074,7 +1214,7 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
   loadBlueprint: (state, opts) => {
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
-      const normalized = normalizeState(state);
+      const normalized = normalizeState(repairStaleCitesBlueprint(state));
       // Merge source provenance counters (SRC_PDF, SRC_CSV, …) from the import pipeline
       if (opts?.srcRefCounters) {
         normalized.traceabilityCounters = { ...normalized.traceabilityCounters, ...opts.srcRefCounters };
@@ -1164,6 +1304,8 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
         storyboardImages: imported.storyboardImages,
         storyboardVisible: imported.storyboardVisible,
         storyboardCollapsed: imported.storyboardCollapsed,
+        stepHeadersVisible: imported.stepHeadersVisible ?? true,
+        subStepHeadersVisible: imported.subStepHeadersVisible ?? true,
         cardLinks: imported.cardLinks,
         evidence: imported.evidence,
         opportunities: imported.opportunities,
@@ -1311,6 +1453,36 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
     });
   },
 
+  importEcitesLifecycle: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      try {
+        const merged = loadBundledCitesBlueprint(current);
+        const nextDocument = cloneDocumentState(normalizeState(merged));
+        const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+        persist(nextDocument);
+        return {
+          ...s,
+          ...nextDocument,
+          _past: nextPast,
+          _future: [],
+          canUndo: nextPast.length > 0,
+          canRedo: false,
+        };
+      } catch (err) {
+        console.error('[service-blueprint] CITES blueprint import failed', err);
+        if (typeof window !== 'undefined') {
+          window.alert(
+            err instanceof Error
+              ? `Could not load CITES blueprint: ${err.message}`
+              : 'Could not load CITES blueprint.',
+          );
+        }
+        return s;
+      }
+    });
+  },
+
   // Stages
   addStage: (title) => {
     set((s) => {
@@ -1353,27 +1525,30 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
         phase: anchor.phase,
         traceabilityCode: stCode,
       };
-      // Seed a default step so the new stage matches the "1 step per stage"
-      // invariant the rest of the board assumes (otherwise showStepHeaders
-      // flips on and an empty step-header row appears across every stage).
-      const { code: ssCode, updatedCounters: countersAfterSs } = generateTraceabilityCode('SS', countersAfterSt);
-      const newStep: Step = {
-        id: uuid(),
-        blueprintId: s.blueprint.id,
-        stageId: newStage.id,
-        title,
-        order: 0,
-        traceabilityCode: ssCode,
-      };
       const shifted = current.stages.map((st) =>
         st.order >= insertOrder ? { ...st, order: st.order + 1 } : st,
       );
+      let nextSteps = current.steps;
+      let countersAfter = countersAfterSt;
+      if (!isL1Blueprint(current)) {
+        const { code: ssCode, updatedCounters: countersAfterSs } = generateTraceabilityCode('SS', countersAfterSt);
+        countersAfter = countersAfterSs;
+        const newStep: Step = {
+          id: uuid(),
+          blueprintId: s.blueprint.id,
+          stageId: newStage.id,
+          title,
+          order: 0,
+          traceabilityCode: ssCode,
+        };
+        nextSteps = [...current.steps, newStep];
+      }
       const nextDocument = cloneDocumentState({
         ...current,
         stages: [...shifted, newStage],
-        steps: [...current.steps, newStep],
+        steps: nextSteps,
         blueprint: { ...current.blueprint, updatedAt: now() },
-        traceabilityCounters: countersAfterSs,
+        traceabilityCounters: countersAfter,
       });
       const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
       persist(nextDocument);
@@ -1415,13 +1590,24 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const current = cloneDocumentState(pickDocumentState(s));
       const stepIds = s.steps.filter((st) => st.stageId === id).map((st) => st.id);
       const stepIdSet = new Set(stepIds);
-      const removedCardIds = new Set(current.cards.filter((c) => stepIdSet.has(c.stepId)).map((c) => c.id));
+      const removedSubStepIds = new Set((current.subSteps ?? []).filter((ss) => ss.stageId === id).map((ss) => ss.id));
+      const removedCardIds = new Set(
+        current.cards
+          .filter((c) => stepIdSet.has(c.stepId) || (c.subStepId && removedSubStepIds.has(c.subStepId)))
+          .map((c) => c.id),
+      );
       const nextDocument = cloneDocumentState({
         ...current,
         stages: current.stages.filter((st) => st.id !== id),
         steps: current.steps.filter((st) => st.stageId !== id),
-        cards: current.cards.filter((c) => !stepIdSet.has(c.stepId)),
-        storyboardImages: current.storyboardImages.filter((img) => !stepIdSet.has(img.stepId)),
+        subSteps: (current.subSteps ?? []).filter((ss) => ss.stageId !== id),
+        cards: current.cards.filter((c) => !removedCardIds.has(c.id)),
+        storyboardImages: current.storyboardImages.filter(
+          (img) =>
+            img.stageId !== id
+            && (!img.stepId || !stepIdSet.has(img.stepId))
+            && (!img.subStepId || !removedSubStepIds.has(img.subStepId)),
+        ),
         cardLinks: current.cardLinks.filter((l) => !removedCardIds.has(l.sourceCardId) && !removedCardIds.has(l.targetCardId)),
         evidence: current.evidence.filter((e) => !removedCardIds.has(e.cardId)),
         stepLinks: current.stepLinks.filter((l) => !stepIdSet.has(l.sourceStepId) && !stepIdSet.has(l.targetStepId)),
@@ -1470,10 +1656,81 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
   },
 
   // Steps
+  ensureDefaultStepForStage: (stageId) => {
+    let createdStepId: string | null = null;
+    set((s) => {
+      const existing = s.steps.find((st) => st.stageId === stageId);
+      if (existing) {
+        createdStepId = existing.id;
+        return s;
+      }
+      const stage = s.stages.find((st) => st.id === stageId);
+      if (!stage) return s;
+
+      const current = cloneDocumentState(pickDocumentState(s));
+      const { code: ssCode, updatedCounters: countersAfterSs } = generateTraceabilityCode('SS', current.traceabilityCounters);
+      const step: Step = {
+        id: uuid(),
+        blueprintId: s.blueprint.id,
+        stageId,
+        title: stage.title,
+        order: 0,
+        traceabilityCode: ssCode,
+      };
+      createdStepId = step.id;
+      const nextDocument = cloneDocumentState({
+        ...current,
+        steps: [...current.steps, step],
+        blueprint: { ...current.blueprint, updatedAt: now() },
+        traceabilityCounters: countersAfterSs,
+      });
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return createdStepId;
+  },
+
   addStep: (stageId, title) => {
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
-      const stepsInStage = s.steps.filter((st) => st.stageId === stageId);
+      const stage = current.stages.find((st) => st.id === stageId);
+      const stepsInStage = current.steps.filter((st) => st.stageId === stageId);
+
+      // A lone placeholder step copied from the stage title becomes the first real step.
+      if (stage && stepsInStage.length === 1) {
+        const placeholder = stepsInStage[0];
+        if (placeholder.title.trim() === stage.title.trim()) {
+          const nextDocument = cloneDocumentState({
+            ...current,
+            steps: current.steps.map((st) => (st.id === placeholder.id ? { ...st, title } : st)),
+            subSteps: (current.subSteps ?? []).map((ss) =>
+              ss.stepId === placeholder.id && ss.title.trim() === stage.title.trim()
+                ? { ...ss, title }
+                : ss,
+            ),
+            blueprint: { ...current.blueprint, updatedAt: now() },
+          });
+          const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+          persist(nextDocument);
+          return {
+            ...s,
+            ...nextDocument,
+            _past: nextPast,
+            _future: [],
+            canUndo: nextPast.length > 0,
+            canRedo: false,
+          };
+        }
+      }
+
       const maxOrder = stepsInStage.reduce((m, st) => Math.max(m, st.order), -1);
       const { code: ssCode, updatedCounters: countersAfterSs } = generateTraceabilityCode('SS', current.traceabilityCounters);
       const step: Step = { id: uuid(), blueprintId: s.blueprint.id, stageId, title, order: maxOrder + 1, traceabilityCode: ssCode };
@@ -1521,12 +1778,22 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
   deleteStep: (id) => {
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
-      const removedCardIds = new Set(current.cards.filter((c) => c.stepId === id).map((c) => c.id));
+      const removedSubStepIds = new Set((current.subSteps ?? []).filter((ss) => ss.stepId === id).map((ss) => ss.id));
+      const removedCardIds = new Set(
+        current.cards
+          .filter((c) => c.stepId === id || (c.subStepId && removedSubStepIds.has(c.subStepId)))
+          .map((c) => c.id),
+      );
       const nextDocument = cloneDocumentState({
         ...current,
         steps: current.steps.filter((st) => st.id !== id),
-        cards: current.cards.filter((c) => c.stepId !== id),
-        storyboardImages: current.storyboardImages.filter((img) => img.stepId !== id),
+        subSteps: (current.subSteps ?? []).filter((ss) => ss.stepId !== id),
+        cards: current.cards.filter((c) => !removedCardIds.has(c.id)),
+        storyboardImages: current.storyboardImages.filter(
+          (img) =>
+            img.stepId !== id
+            && (!img.subStepId || !removedSubStepIds.has(img.subStepId)),
+        ),
         cardLinks: current.cardLinks.filter((l) => !removedCardIds.has(l.sourceCardId) && !removedCardIds.has(l.targetCardId)),
         evidence: current.evidence.filter((e) => !removedCardIds.has(e.cardId)),
         stepLinks: current.stepLinks.filter((l) => l.sourceStepId !== id && l.targetStepId !== id),
@@ -1561,6 +1828,165 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const nextDocument = cloneDocumentState({
         ...current,
         steps: [...otherSteps, ...reordered],
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  ensureDefaultSubStepForStep: (stepId) => {
+    let createdSubStepId: string | null = null;
+    set((s) => {
+      const existing = (s.subSteps ?? []).find((ss) => ss.stepId === stepId);
+      if (existing) {
+        createdSubStepId = existing.id;
+        return s;
+      }
+      const step = s.steps.find((st) => st.id === stepId);
+      if (!step) return s;
+
+      const current = cloneDocumentState(pickDocumentState(s));
+      const { code: sbsCode, updatedCounters } = generateTraceabilityCode('SBS', current.traceabilityCounters);
+      const subStep: SubStep = {
+        id: uuid(),
+        blueprintId: s.blueprint.id,
+        stageId: step.stageId,
+        stepId,
+        title: step.title,
+        order: 0,
+        traceabilityCode: sbsCode,
+      };
+      createdSubStepId = subStep.id;
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSteps: [...(current.subSteps ?? []), subStep],
+        blueprint: { ...current.blueprint, updatedAt: now() },
+        traceabilityCounters: updatedCounters,
+      });
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return createdSubStepId;
+  },
+
+  addSubStep: (stepId, title) => {
+    set((s) => {
+      const step = s.steps.find((st) => st.id === stepId);
+      if (!step) return s;
+      const current = cloneDocumentState(pickDocumentState(s));
+      const subStepsInStep = (s.subSteps ?? []).filter((ss) => ss.stepId === stepId);
+      const maxOrder = subStepsInStep.reduce((m, ss) => Math.max(m, ss.order), -1);
+      const { code: sbsCode, updatedCounters } = generateTraceabilityCode('SBS', current.traceabilityCounters);
+      const subStep: SubStep = {
+        id: uuid(),
+        blueprintId: s.blueprint.id,
+        stageId: step.stageId,
+        stepId,
+        title,
+        order: maxOrder + 1,
+        traceabilityCode: sbsCode,
+      };
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSteps: [...(current.subSteps ?? []), subStep],
+        blueprint: { ...current.blueprint, updatedAt: now() },
+        traceabilityCounters: updatedCounters,
+      });
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  updateSubStep: (id, patch) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSteps: (current.subSteps ?? []).map((ss) => (ss.id === id ? { ...ss, ...patch } : ss)),
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  deleteSubStep: (id) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const removedCardIds = new Set(current.cards.filter((c) => c.subStepId === id).map((c) => c.id));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSteps: (current.subSteps ?? []).filter((ss) => ss.id !== id),
+        cards: current.cards.filter((c) => c.subStepId !== id),
+        storyboardImages: current.storyboardImages.filter((img) => img.subStepId !== id),
+        cardLinks: current.cardLinks.filter((l) => !removedCardIds.has(l.sourceCardId) && !removedCardIds.has(l.targetCardId)),
+        evidence: current.evidence.filter((e) => !removedCardIds.has(e.cardId)),
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  reorderSubStep: (id, newOrder) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const subStep = (s.subSteps ?? []).find((ss) => ss.id === id);
+      if (!subStep) return s;
+      const subStepsInStep = [...(s.subSteps ?? []).filter((ss) => ss.stepId === subStep.stepId)].sort((a, b) => a.order - b.order);
+      const idx = subStepsInStep.findIndex((ss) => ss.id === id);
+      if (idx === -1) return s;
+      const [moved] = subStepsInStep.splice(idx, 1);
+      subStepsInStep.splice(newOrder, 0, moved);
+      const reordered = subStepsInStep.map((ss, i) => ({ ...ss, order: i }));
+      const otherSubSteps = (s.subSteps ?? []).filter((ss) => ss.stepId !== subStep.stepId);
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSteps: [...otherSubSteps, ...reordered],
         blueprint: { ...current.blueprint, updatedAt: now() },
       });
       if (isSameDocument(current, nextDocument)) return s;
@@ -1647,7 +2073,7 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const current = cloneDocumentState(pickDocumentState(s));
       const step = s.steps.find((st) => st.id === stepId);
       if (!step) return s;
-      const cellCards = s.cards.filter((c) => c.stepId === stepId && c.laneKey === laneKey);
+      const cellCards = s.cards.filter((c) => c.stepId === stepId && !c.subStepId && c.laneKey === laneKey);
       const maxOrder = cellCards.reduce((m, c) => Math.max(m, c.order), -1);
       const ts = now();
       const prefix = getLanePrefix(laneKey);
@@ -1657,6 +2083,54 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
         blueprintId: s.blueprint.id,
         stageId: step.stageId,
         stepId,
+        laneKey,
+        title,
+        body,
+        order: maxOrder + 1,
+        tags,
+        sourceFile: '',
+        sourceSheet: '',
+        sourceRow: null,
+        sourceRef: '',
+        createdAt: ts,
+        updatedAt: ts,
+        traceabilityCode: cardCode,
+      };
+      const nextDocument = cloneDocumentState({
+        ...current,
+        cards: [...current.cards, card],
+        blueprint: { ...current.blueprint, updatedAt: ts },
+        traceabilityCounters: countersAfterCard,
+      });
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  addCardToSubStep: (subStepId, laneKey, title, body = '', tags = []) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const subStep = (s.subSteps ?? []).find((ss) => ss.id === subStepId);
+      if (!subStep) return s;
+      const cellCards = s.cards.filter((c) => c.subStepId === subStepId && c.laneKey === laneKey);
+      const maxOrder = cellCards.reduce((m, c) => Math.max(m, c.order), -1);
+      const ts = now();
+      const prefix = getLanePrefix(laneKey);
+      const { code: cardCode, updatedCounters: countersAfterCard } = generateTraceabilityCode(prefix, current.traceabilityCounters);
+      const card: Card = {
+        id: uuid(),
+        blueprintId: s.blueprint.id,
+        stageId: subStep.stageId,
+        stepId: subStep.stepId,
+        subStepId,
         laneKey,
         title,
         body,
@@ -1802,18 +2276,56 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
   },
 
   // Storyboard
-  addStoryboardImage: (stepId, dataUrl) => {
+  addStoryboardImage: (target, dataUrl) => {
     let newId = '';
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
-      const step = s.steps.find((st) => st.id === stepId);
-      if (!step) return s;
       const ts = now();
       newId = uuid();
-      const nextImages = [
-        ...current.storyboardImages,
-        { id: newId, blueprintId: s.blueprint.id, stepId, dataUrl, createdAt: ts, updatedAt: ts } as StoryboardImage,
-      ];
+
+      let image: StoryboardImage;
+      if ('stageId' in target) {
+        const stage = s.stages.find((st) => st.id === target.stageId);
+        if (!stage) return s;
+        image = {
+          id: newId,
+          blueprintId: s.blueprint.id,
+          stageId: target.stageId,
+          columnKey: storyboardColumnKey(stage.title, ''),
+          dataUrl,
+          createdAt: ts,
+          updatedAt: ts,
+        };
+      } else if ('subStepId' in target) {
+        const subStep = (s.subSteps ?? []).find((ss) => ss.id === target.subStepId);
+        if (!subStep) return s;
+        const step = s.steps.find((st) => st.id === subStep.stepId);
+        const stage = s.stages.find((st) => st.id === subStep.stageId);
+        image = {
+          id: newId,
+          blueprintId: s.blueprint.id,
+          subStepId: target.subStepId,
+          columnKey: storyboardColumnKey(stage?.title ?? '', step?.title ?? '', subStep.title),
+          dataUrl,
+          createdAt: ts,
+          updatedAt: ts,
+        };
+      } else {
+        const step = s.steps.find((st) => st.id === target.stepId);
+        if (!step) return s;
+        const stage = s.stages.find((st) => st.id === step.stageId);
+        image = {
+          id: newId,
+          blueprintId: s.blueprint.id,
+          stepId: target.stepId,
+          columnKey: storyboardColumnKey(stage?.title ?? '', step.title),
+          dataUrl,
+          createdAt: ts,
+          updatedAt: ts,
+        };
+      }
+
+      const nextImages = [...current.storyboardImages, image];
       const nextDocument = cloneDocumentState({
         ...current,
         storyboardImages: nextImages,
@@ -1887,6 +2399,133 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const nextDocument = cloneDocumentState({
         ...current,
         storyboardVisible: !current.storyboardVisible,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleStepHeadersVisible: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        stepHeadersVisible: !(current.stepHeadersVisible ?? true),
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setActorJourneyFilter: (filter) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        actorJourneyFilter: filter,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setSystemJourneyFilter: (filter) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        systemJourneyFilter: filter,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setActiveUserJourneyId: (journeyId) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        activeUserJourneyId: journeyId,
+        descriptionVisibleInUserJourney: journeyId ? false : current.descriptionVisibleInUserJourney,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleDescriptionVisibleInUserJourney: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        descriptionVisibleInUserJourney: !current.descriptionVisibleInUserJourney,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleSubStepHeadersVisible: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subStepHeadersVisible: !(current.subStepHeadersVisible ?? true),
       });
       if (isSameDocument(current, nextDocument)) return s;
       const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
@@ -2509,7 +3148,13 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
 
   getCardsForCell: (stepId, laneKey) => {
     return get()
-      .cards.filter((c) => c.stepId === stepId && c.laneKey === laneKey)
+      .cards.filter((c) => c.stepId === stepId && !c.subStepId && c.laneKey === laneKey)
+      .sort((a, b) => a.order - b.order);
+  },
+
+  getCardsForSubStepCell: (subStepId, laneKey) => {
+    return get()
+      .cards.filter((c) => c.subStepId === subStepId && c.laneKey === laneKey)
       .sort((a, b) => a.order - b.order);
   },
 }));

@@ -4,13 +4,17 @@ import { useState, useRef, useEffect } from 'react';
 import { Pencil } from 'lucide-react';
 import { type Stage } from '@/lib/types';
 import { useBlueprintStore } from '@/store/blueprint-store';
+import { cn } from '@/lib/utils';
+import { STAGE_BOUNDARY_CLASS } from './StageBounds';
 
 interface StageDescriptionProps {
   stage: Stage;
   width: number;
+  /** Match stage header right border at stage boundary. */
+  bounded?: boolean;
 }
 
-export function StageDescription({ stage, width }: StageDescriptionProps) {
+export function StageDescription({ stage, width, bounded = false }: StageDescriptionProps) {
   const updateStage = useBlueprintStore((s) => s.updateStage);
   const readOnly = useBlueprintStore((s) => s.readOnly);
   const [editing, setEditing] = useState(false);
@@ -31,7 +35,10 @@ export function StageDescription({ stage, width }: StageDescriptionProps) {
 
   return (
     <div
-      className="group flex min-h-[60px] shrink-0 items-start gap-1 border-b border-r border-neutral-200 bg-white px-3 py-2"
+      className={cn(
+        'group flex min-h-[60px] shrink-0 items-start gap-1 border-b bg-white px-3 py-2',
+        bounded ? STAGE_BOUNDARY_CLASS : 'border-r border-r-neutral-200',
+      )}
       style={{ width }}
     >
       {editing && !readOnly ? (

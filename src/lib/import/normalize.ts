@@ -275,6 +275,8 @@ function emptyImportState(bpId: string, ts: string, serviceName: string): Bluepr
     storyboardImages: [],
     storyboardVisible: true,
     storyboardCollapsed: false,
+    stepHeadersVisible: true,
+    subStepHeadersVisible: true,
     cardLinks: [],
     evidence: [],
     opportunities: [],

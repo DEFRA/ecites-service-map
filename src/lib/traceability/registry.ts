@@ -10,6 +10,8 @@ export const TRACEABILITY_PREFIXES = {
   stage: 'ST',
   stage_outcome: 'SO',
   step: 'SS',
+  sub_step: 'SBS',
+  sub_sub_step: 'SSS',
   // Swimlane card types (keyed by LaneKey)
   actor: 'AC',
   user_action_event: 'UA',

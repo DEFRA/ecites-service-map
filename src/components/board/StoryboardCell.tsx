@@ -8,7 +8,7 @@ import type { StoryboardImage } from '@/lib/types';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 interface StoryboardCellProps {
-  stepId: string;
+  stepId?: string;
   /** L3 micro: only offer page/screen adds (no 3:2 slide). */
   microPageOnly?: boolean;
   /** L1/L2: one image per step; L3: multiple allowed. */
@@ -16,7 +16,7 @@ interface StoryboardCellProps {
   images: StoryboardImage[];
   isGenerating?: boolean;
   isAnyGenerating?: boolean;
-  onAddImage: (stepId: string, dataUrl: string) => void;
+  onAddImage: (dataUrl: string) => void;
   onUpdateImage: (id: string, dataUrl: string) => void;
   onRemoveImage: (id: string) => void;
   onGenerate?: (stepId: string) => void;
@@ -47,9 +47,9 @@ export function StoryboardCell({
 
   const handleAddConfirm = useCallback(
     (dataUrl: string) => {
-      onAddImage(stepId, dataUrl);
+      onAddImage(dataUrl);
     },
-    [stepId, onAddImage],
+    [onAddImage],
   );
 
   const handleEditConfirm = useCallback(
@@ -111,7 +111,7 @@ export function StoryboardCell({
           onConfirm={handleAddConfirm}
           defaultFormat="page"
           lockFormat="page"
-          onGenerateWithAI={onGenerate && !microPageOnly && canAddMore ? () => onGenerate(stepId) : undefined}
+          onGenerateWithAI={onGenerate && stepId && !microPageOnly && canAddMore ? () => onGenerate(stepId) : undefined}
           generateWithAIDisabled={isAnyGenerating}
         />
       </>
@@ -187,7 +187,7 @@ export function StoryboardCell({
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                {onGenerate && !microPageOnly && allowMultipleImages && (
+                {onGenerate && stepId && !microPageOnly && allowMultipleImages && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -253,7 +253,7 @@ export function StoryboardCell({
         onConfirm={handleAddConfirm}
         defaultFormat="page"
         lockFormat="page"
-        onGenerateWithAI={onGenerate && !microPageOnly && canAddMore ? () => onGenerate(stepId) : undefined}
+        onGenerateWithAI={onGenerate && stepId && !microPageOnly && canAddMore ? () => onGenerate(stepId) : undefined}
         generateWithAIDisabled={isAnyGenerating}
       />
       <ImageCropModal

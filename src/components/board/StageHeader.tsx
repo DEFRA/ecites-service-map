@@ -5,6 +5,8 @@ import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type Stage } from '@/lib/types';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { stripTraceabilityForDisplay } from '@/lib/traceability/display';
+import { cn } from '@/lib/utils';
+import { STAGE_BOUNDARY_CLASS } from './StageBounds';
 
 interface StageHeaderProps {
   stage: Stage;
@@ -12,14 +14,19 @@ interface StageHeaderProps {
   stepWidth: number;
   /** When true, this header represents a "step" (L2/L3 child view) rather than a "stage" (L1). */
   isChildLevel?: boolean;
+  /** Lifecycle: right border aligned with step columns below. */
+  bounded?: boolean;
+  /** Fill a CSS grid cell instead of using an explicit pixel width. */
+  fillWidth?: boolean;
 }
 
-export function StageHeader({ stage, stepCount, stepWidth, isChildLevel = false }: StageHeaderProps) {
+export function StageHeader({ stage, stepCount, stepWidth, isChildLevel = false, bounded = false, fillWidth = false }: StageHeaderProps) {
   const entityLabel = isChildLevel ? 'step' : 'stage';
   const entityLabelCap = isChildLevel ? 'Step' : 'Stage';
   const updateStage = useBlueprintStore((s) => s.updateStage);
   const deleteStage = useBlueprintStore((s) => s.deleteStage);
   const insertStageAfter = useBlueprintStore((s) => s.insertStageAfter);
+  const addStep = useBlueprintStore((s) => s.addStep);
   const reorderStage = useBlueprintStore((s) => s.reorderStage);
   const stages = useBlueprintStore((s) => s.stages);
   const readOnly = useBlueprintStore((s) => s.readOnly);
@@ -56,8 +63,12 @@ export function StageHeader({ stage, stepCount, stepWidth, isChildLevel = false 
 
   return (
     <div
-      className="group/stageheader relative min-h-[56px] min-w-0 shrink-0 self-stretch border-b border-r border-neutral-200 bg-white px-4 py-1.5"
-      style={{ width: stepCount * stepWidth }}
+      className={cn(
+        'group/stageheader relative flex h-full min-h-0 min-w-0 max-w-full shrink-0 items-center self-stretch overflow-hidden bg-white px-3 py-1',
+        fillWidth ? 'w-full' : '',
+        !fillWidth && (bounded ? STAGE_BOUNDARY_CLASS : 'border-r border-r-neutral-200'),
+      )}
+      style={fillWidth ? undefined : { width: stepCount * stepWidth }}
     >
       {editingTitle && !readOnly ? (
         <input
@@ -73,10 +84,10 @@ export function StageHeader({ stage, stepCount, stepWidth, isChildLevel = false 
           }}
           onBlur={saveTitle}
           aria-label={`${entityLabelCap} title`}
-          className="mt-0.5 w-full max-w-full rounded border border-neutral-300 bg-white px-2.5 py-1 text-[17px] font-semibold text-neutral-900 outline-none focus:border-blue-400"
+          className="mt-0.5 w-full max-w-full rounded border border-neutral-300 bg-white px-2 py-0.5 text-[13px] font-semibold text-neutral-900 outline-none focus:border-blue-400"
         />
       ) : (
-        <h3 className="break-words text-[17px] font-bold leading-snug tracking-tight text-neutral-900">
+        <h3 className="min-w-0 break-words text-[13px] font-semibold leading-snug tracking-tight text-neutral-900">
           {displayTitle || stage.title}
         </h3>
       )}
@@ -129,6 +140,19 @@ export function StageHeader({ stage, stepCount, stepWidth, isChildLevel = false 
         >
           <Plus aria-hidden="true" className="h-3 w-3" /> {entityLabelCap}
         </button>
+        {!isChildLevel && (
+          <button
+            type="button"
+            onClick={(e) => {
+              addStep(stage.id, 'New step');
+              e.currentTarget.blur();
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-600 transition-colors hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            aria-label={`Add step within ${stage.title}`}
+          >
+            <Plus aria-hidden="true" className="h-3 w-3" /> Step
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {

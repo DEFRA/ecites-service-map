@@ -27,6 +27,7 @@ import {
   Sparkles,
   LifeBuoy,
   ListChecks,
+  SquareStack,
 } from 'lucide-react';
 import { type LaneDefinition } from '@/lib/types';
 import { getLaneTitle } from '@/lib/lane-definitions';
@@ -55,6 +56,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   backstage_actor: UserCog,
   shared_services: Share2,
   product_teams: Users,
+  sub_sub_step: SquareStack,
   opportunities: Sparkles,
   ideas: Lightbulb,
   // L1 Macro lanes
@@ -92,6 +94,7 @@ export const LANE_COLOR_TOKENS: Record<string, { bg: string; text: string; borde
   backstage_actor: { bg: 'bg-zinc-50', text: 'text-zinc-700', border: 'border-zinc-200' },
   shared_services: { bg: 'bg-pink-50', text: 'text-pink-700', border: 'border-pink-200' },
   product_teams: { bg: 'bg-[#E6F3EB]', text: 'text-[#008938]', border: 'border-[#B6DEC6]' },
+  sub_sub_step: { bg: 'bg-neutral-50', text: 'text-neutral-600', border: 'border-neutral-200' },
   opportunities: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
   ideas: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200' },
   // L1 Macro lanes

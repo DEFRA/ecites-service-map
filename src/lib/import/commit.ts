@@ -262,6 +262,8 @@ export function commitMappedRows(
       storyboardImages: [],
       storyboardVisible: true,
       storyboardCollapsed: false,
+      stepHeadersVisible: true,
+      subStepHeadersVisible: true,
       cardLinks: [],
       evidence: [],
       opportunities: [],
