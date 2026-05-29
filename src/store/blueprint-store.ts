@@ -457,6 +457,8 @@ function normalizeState(state: BlueprintState): BlueprintState {
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
     systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
+    painPointJourneyFilter: state.painPointJourneyFilter ?? null,
     userJourneys: state.userJourneys ?? [],
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
@@ -646,6 +648,10 @@ interface BlueprintStore extends BlueprintState {
   setActorJourneyFilter: (filter: string | null) => void;
   /** Filter visible sub-step columns to those with a matching system card (null = all). */
   setSystemJourneyFilter: (filter: string | null) => void;
+  /** Filter visible sub-step columns to those with a matching user need card (null = all). */
+  setUserNeedJourneyFilter: (filter: string | null) => void;
+  /** Filter visible sub-step columns to those with a matching pain point card (null = all). */
+  setPainPointJourneyFilter: (filter: string | null) => void;
   /** Switch between full lifecycle view and a user journey from the spreadsheet. */
   setActiveUserJourneyId: (journeyId: string | null) => void;
   /** Show or hide the hierarchy description row while a user journey is active. */
@@ -736,6 +742,8 @@ function emptyBlueprint(): BlueprintState {
     subStepHeadersVisible: true,
     actorJourneyFilter: null,
     systemJourneyFilter: null,
+    userNeedJourneyFilter: null,
+    painPointJourneyFilter: null,
     userJourneys: [],
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
@@ -780,6 +788,8 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
     systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
+    painPointJourneyFilter: state.painPointJourneyFilter ?? null,
     userJourneys: (state.userJourneys ?? []).map((journey) => ({
       ...journey,
       subStepIds: [...journey.subStepIds],
@@ -874,6 +884,8 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
     systemJourneyFilter: state.systemJourneyFilter ?? null,
+    userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
+    painPointJourneyFilter: state.painPointJourneyFilter ?? null,
     userJourneys: (state.userJourneys ?? []).map((journey) => ({
       ...journey,
       subStepIds: [...journey.subStepIds],
@@ -1001,6 +1013,8 @@ function persist(state: BlueprintState) {
     subStepHeadersVisible: forDisk.subStepHeadersVisible ?? true,
     actorJourneyFilter: forDisk.actorJourneyFilter ?? null,
     systemJourneyFilter: forDisk.systemJourneyFilter ?? null,
+    userNeedJourneyFilter: forDisk.userNeedJourneyFilter ?? null,
+    painPointJourneyFilter: forDisk.painPointJourneyFilter ?? null,
     userJourneys: forDisk.userJourneys ?? [],
     activeUserJourneyId: forDisk.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: forDisk.descriptionVisibleInUserJourney ?? false,
@@ -2462,6 +2476,48 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const nextDocument = cloneDocumentState({
         ...current,
         systemJourneyFilter: filter,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setUserNeedJourneyFilter: (filter) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        userNeedJourneyFilter: filter,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setPainPointJourneyFilter: (filter) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        painPointJourneyFilter: filter,
       });
       if (isSameDocument(current, nextDocument)) return s;
       const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);

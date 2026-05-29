@@ -2,7 +2,7 @@ import type { Card, LaneKey } from './types';
 import type { L1BoardLayout } from './board-columns';
 
 /** Lanes with per-column cards, deduplication, journey filter dropdown, and column filtering. */
-export const JOURNEY_FILTER_LANE_KEYS = ['actor', 'system'] as const;
+export const JOURNEY_FILTER_LANE_KEYS = ['actor', 'system', 'user_need', 'pain_point'] as const;
 
 export type JourneyFilterLaneKey = (typeof JOURNEY_FILTER_LANE_KEYS)[number];
 

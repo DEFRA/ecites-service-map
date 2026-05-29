@@ -40,6 +40,7 @@ import {
   filterL1BoardLayout,
   intersectSubStepIdSets,
   isJourneyFilterLane,
+  type JourneyFilterLaneKey,
   visibleSubStepIdsForJourneyFilters,
 } from '@/lib/journey-lane-filter';
 import { JourneyFilterLabel, isJourneyFilterLabelLane } from './JourneyFilterLabel';
@@ -60,7 +61,7 @@ import { StageBounds, stageColCount, stepDividerClass, STAGE_BOUNDARY_CLASS } fr
 import { BoardAddColumnSpacer } from './BoardAddColumnSpacer';
 
 const FRONTSTAGE_BOUNDARY_KEY = 'frontstage_touchpoint';
-const NON_COLLAPSIBLE_LANE_KEYS = new Set<LaneKey>(['actor', 'system']);
+const NON_COLLAPSIBLE_LANE_KEYS = new Set<LaneKey>(['actor', 'system', 'user_need', 'pain_point']);
 
 const STEP_WIDTH = BOARD_STEP_WIDTH;
 const ADD_COLUMN_WIDTH = BOARD_ADD_COLUMN_WIDTH;
@@ -198,6 +199,10 @@ export function Board() {
   const setActorJourneyFilter = useBlueprintStore((s) => s.setActorJourneyFilter);
   const systemJourneyFilter = useBlueprintStore((s) => s.systemJourneyFilter ?? null);
   const setSystemJourneyFilter = useBlueprintStore((s) => s.setSystemJourneyFilter);
+  const userNeedJourneyFilter = useBlueprintStore((s) => s.userNeedJourneyFilter ?? null);
+  const setUserNeedJourneyFilter = useBlueprintStore((s) => s.setUserNeedJourneyFilter);
+  const painPointJourneyFilter = useBlueprintStore((s) => s.painPointJourneyFilter ?? null);
+  const setPainPointJourneyFilter = useBlueprintStore((s) => s.setPainPointJourneyFilter);
   const userJourneys = useBlueprintStore((s) => s.userJourneys ?? []);
   const activeUserJourneyId = useBlueprintStore((s) => s.activeUserJourneyId ?? null);
   const descriptionVisibleInUserJourney = useBlueprintStore(
@@ -423,6 +428,40 @@ export function Board() {
     () => collectJourneyLaneTypes(cards, l1Layout, 'system'),
     [cards, l1Layout],
   );
+  const userNeedTypes = useMemo(
+    () => collectJourneyLaneTypes(cards, l1Layout, 'user_need'),
+    [cards, l1Layout],
+  );
+  const painPointTypes = useMemo(
+    () => collectJourneyLaneTypes(cards, l1Layout, 'pain_point'),
+    [cards, l1Layout],
+  );
+
+  const journeyFilterLaneConfig = useMemo(
+    (): Record<
+      JourneyFilterLaneKey,
+      { types: string[]; filter: string | null; setFilter: (filter: string | null) => void }
+    > => ({
+      actor: { types: actorTypes, filter: actorJourneyFilter, setFilter: setActorJourneyFilter },
+      system: { types: systemTypes, filter: systemJourneyFilter, setFilter: setSystemJourneyFilter },
+      user_need: { types: userNeedTypes, filter: userNeedJourneyFilter, setFilter: setUserNeedJourneyFilter },
+      pain_point: { types: painPointTypes, filter: painPointJourneyFilter, setFilter: setPainPointJourneyFilter },
+    }),
+    [
+      actorTypes,
+      actorJourneyFilter,
+      setActorJourneyFilter,
+      systemTypes,
+      systemJourneyFilter,
+      setSystemJourneyFilter,
+      userNeedTypes,
+      userNeedJourneyFilter,
+      setUserNeedJourneyFilter,
+      painPointTypes,
+      painPointJourneyFilter,
+      setPainPointJourneyFilter,
+    ],
+  );
 
   const activeJourney = useMemo(
     () => activeUserJourney(userJourneys, activeUserJourneyId),
@@ -436,11 +475,20 @@ export function Board() {
     const laneFilterIds = visibleSubStepIdsForJourneyFilters(cards, {
       actor: actorJourneyFilter,
       system: systemJourneyFilter,
+      user_need: userNeedJourneyFilter,
+      pain_point: painPointJourneyFilter,
     });
     if (laneFilterIds) sets.push(laneFilterIds);
     if (sets.length === 0) return null;
     return intersectSubStepIdSets(sets);
-  }, [cards, actorJourneyFilter, systemJourneyFilter, activeJourney]);
+  }, [
+    cards,
+    actorJourneyFilter,
+    systemJourneyFilter,
+    userNeedJourneyFilter,
+    painPointJourneyFilter,
+    activeJourney,
+  ]);
 
   const displayL1Layout = useMemo(() => {
     if (!l1Layout || !journeyColumnFilterIds) return l1Layout;
@@ -466,6 +514,20 @@ export function Board() {
       setSystemJourneyFilter(null);
     }
   }, [showJourneyLaneFilters, systemJourneyFilter, systemTypes, setSystemJourneyFilter]);
+
+  useEffect(() => {
+    if (!showJourneyLaneFilters || userNeedJourneyFilter === null) return;
+    if (!userNeedTypes.includes(userNeedJourneyFilter)) {
+      setUserNeedJourneyFilter(null);
+    }
+  }, [showJourneyLaneFilters, userNeedJourneyFilter, userNeedTypes, setUserNeedJourneyFilter]);
+
+  useEffect(() => {
+    if (!showJourneyLaneFilters || painPointJourneyFilter === null) return;
+    if (!painPointTypes.includes(painPointJourneyFilter)) {
+      setPainPointJourneyFilter(null);
+    }
+  }, [showJourneyLaneFilters, painPointJourneyFilter, painPointTypes, setPainPointJourneyFilter]);
 
   const phaseGroups = useMemo(() => {
     if (!isL1MacroMode) return [];
@@ -545,11 +607,10 @@ export function Board() {
 
   const journeyFilterForLane = useCallback(
     (laneKey: LaneKey): string | null => {
-      if (laneKey === 'actor') return actorJourneyFilter;
-      if (laneKey === 'system') return systemJourneyFilter;
-      return null;
+      if (!isJourneyFilterLane(laneKey)) return null;
+      return journeyFilterLaneConfig[laneKey].filter;
     },
-    [actorJourneyFilter, systemJourneyFilter],
+    [journeyFilterLaneConfig],
   );
 
   const displayLaneCellCards = useCallback(
@@ -680,6 +741,8 @@ export function Board() {
     subSteps,
     actorJourneyFilter,
     systemJourneyFilter,
+    userNeedJourneyFilter,
+    painPointJourneyFilter,
     activeUserJourneyId,
     descriptionVisibleInUserJourney,
     stepHeadersVisible,
@@ -930,8 +993,8 @@ export function Board() {
       <div className="flex flex-1 items-center justify-center bg-[#fafafa] p-8 text-center">
         <p className="max-w-md text-[14px] leading-relaxed text-neutral-600">
           {activeJourney
-            ? `No columns match the ${activeJourney.name} journey with the current filters. Try clearing the actor or system filter, or switch back to Lifecycle.`
-            : 'No columns match the selected actor or system filter. Change the filter from the Actors or Systems menu, or choose “All actors” / “All systems”.'}
+            ? `No columns match the ${activeJourney.name} journey with the current filters. Try clearing lane filters, or switch back to Lifecycle.`
+            : 'No columns match the active lane filters. Clear filters from the Actors, Systems, User need or Pain points menus, or choose “All…”.'}
         </p>
       </div>
     );
@@ -1121,9 +1184,9 @@ export function Board() {
                     <JourneyFilterLabel
                       lane={lane}
                       collapsed={lane.collapsed}
-                      filterTypes={lane.key === 'actor' ? actorTypes : systemTypes}
-                      selectedFilter={lane.key === 'actor' ? actorJourneyFilter : systemJourneyFilter}
-                      onSelectFilter={lane.key === 'actor' ? setActorJourneyFilter : setSystemJourneyFilter}
+                      filterTypes={journeyFilterLaneConfig[lane.key].types}
+                      selectedFilter={journeyFilterLaneConfig[lane.key].filter}
+                      onSelectFilter={journeyFilterLaneConfig[lane.key].setFilter}
                     />
                   ) : (
                     <LaneLabel

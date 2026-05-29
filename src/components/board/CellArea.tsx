@@ -10,8 +10,15 @@ import { BlueprintCard } from './BlueprintCard';
 import { cn } from '@/lib/utils';
 import { CardTagEditor, getReusableTagSuggestions } from './CardTagEditor';
 
-import { isJourneyFilterLane } from '@/lib/journey-lane-filter';
+import { isJourneyFilterLane, type JourneyFilterLaneKey } from '@/lib/journey-lane-filter';
 import { LANE_COLOR_TOKENS } from './LaneLabel';
+
+const HIDDEN_BADGE_NOUN: Partial<Record<JourneyFilterLaneKey, string>> = {
+  actor: 'actor',
+  system: 'system',
+  user_need: 'user need',
+  pain_point: 'pain point',
+};
 
 interface CellAreaProps {
   stepId?: string;
@@ -83,7 +90,7 @@ export function CellArea({ stepId, subStepId, laneKey, cards, hiddenActorCount =
           (LANE_COLOR_TOKENS[laneKey] ?? LANE_COLOR_TOKENS.actor).border,
           (LANE_COLOR_TOKENS[laneKey] ?? LANE_COLOR_TOKENS.actor).text,
         )}
-        aria-label={`${hiddenActorCount} more ${laneKey === 'system' ? 'system' : 'actor'}${hiddenActorCount === 1 ? '' : 's'} hidden in this column`}
+        aria-label={`${hiddenActorCount} more ${HIDDEN_BADGE_NOUN[laneKey] ?? 'item'}${hiddenActorCount === 1 ? '' : 's'} hidden in this column`}
       >
         {hiddenActorCount} hidden
       </span>

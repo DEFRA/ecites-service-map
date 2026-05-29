@@ -1,9 +1,9 @@
 'use client';
 
-import { User, Database, ChevronDown, Check } from 'lucide-react';
+import { User, Database, Heart, AlertTriangle, ChevronDown, Check } from 'lucide-react';
 import { type LaneDefinition, type LaneKey } from '@/lib/types';
 import { getLaneTitle } from '@/lib/lane-definitions';
-import { type JourneyFilterLaneKey } from '@/lib/journey-lane-filter';
+import { type JourneyFilterLaneKey, isJourneyFilterLane } from '@/lib/journey-lane-filter';
 import { LANE_COLOR_TOKENS } from '@/components/board/LaneLabel';
 import {
   DropdownMenu,
@@ -16,11 +16,22 @@ import { cn } from '@/lib/utils';
 const ICON_MAP: Record<JourneyFilterLaneKey, React.ElementType> = {
   actor: User,
   system: Database,
+  user_need: Heart,
+  pain_point: AlertTriangle,
 };
 
 const ALL_LABEL: Record<JourneyFilterLaneKey, string> = {
   actor: 'All actors',
   system: 'All systems',
+  user_need: 'All user needs',
+  pain_point: 'All pain points',
+};
+
+const FOCUS_RING: Record<JourneyFilterLaneKey, string> = {
+  actor: 'focus-visible:ring-blue-400',
+  system: 'focus-visible:ring-cyan-400',
+  user_need: 'focus-visible:ring-amber-400',
+  pain_point: 'focus-visible:ring-rose-400',
 };
 
 interface JourneyFilterLabelProps {
@@ -65,7 +76,7 @@ export function JourneyFilterLabel({
         <DropdownMenuTrigger
           className={cn(
             'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/90 transition-colors hover:bg-white/60 focus:outline-none focus-visible:ring-2',
-            laneKey === 'system' ? 'focus-visible:ring-cyan-400' : 'focus-visible:ring-blue-400',
+            FOCUS_RING[laneKey],
           )}
           aria-label={`Filter journey by ${laneTitle.toLowerCase()}. Current selection: ${menuLabel}`}
         >
@@ -93,5 +104,5 @@ export function JourneyFilterLabel({
 }
 
 export function isJourneyFilterLabelLane(laneKey: LaneKey): laneKey is JourneyFilterLaneKey {
-  return laneKey === 'actor' || laneKey === 'system';
+  return isJourneyFilterLane(laneKey);
 }

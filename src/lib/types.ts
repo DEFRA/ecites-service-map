@@ -445,6 +445,8 @@ export interface BlueprintState {
   /** When set, only sub-step columns with this actor card title are shown (null = all). */
   actorJourneyFilter?: string | null;
   systemJourneyFilter?: string | null;
+  userNeedJourneyFilter?: string | null;
+  painPointJourneyFilter?: string | null;
   /** User journeys parsed from the spreadsheet JOURNEYS section. */
   userJourneys?: UserJourney[];
   /** When set, the board shows only columns in this user journey. */
