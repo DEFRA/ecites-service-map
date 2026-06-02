@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ChangeEvent } from 'react';
 import {
   Plus,
+  Upload,
   Download,
   Eye,
   EyeOff,
@@ -10,25 +11,27 @@ import {
   Undo2,
   Redo2,
   Film,
-  BookOpen,
   Save,
-  Target,
-  Sparkles,
-  Share2,
   Check,
-  AlertCircle,
   List,
   ListTree,
   SquareStack,
 } from 'lucide-react';
-import { publishOrRefreshShare } from '@/lib/share-payload';
 import { useBlueprintStore } from '@/store/blueprint-store';
-import { LibrarySheet } from './LibrarySheet';
 import { cn } from '@/lib/utils';
 import { getLaneTitle, L1_HIDDEN_LANE_KEYS, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES } from '@/lib/lane-definitions';
 import { useLibraryStore } from '@/store/library-store';
-import { exportBlueprintPdf, exportBlueprintSvg, visualExportFilename } from '@/lib/export-visual';
 import { exportBlueprintSpreadsheet, spreadsheetExportFilename } from '@/lib/export-spreadsheet';
+import {
+  blueprintBackupExportFilename,
+  exportBlueprintBackupJson,
+  exportStoryboardImagesZip,
+  storyboardImagesExportFilename,
+} from '@/lib/export-storyboard-images';
+import {
+  parseBlueprintBackupJson,
+  parseStoryboardImagesZip,
+} from '@/lib/import-storyboard-images';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
 import { activeUserJourney, userJourneyHeading } from '@/lib/user-journey';
 import type { Card, Opportunity } from '@/lib/types';
@@ -72,11 +75,7 @@ function librarySnapshotsDiffer(a: unknown, b: unknown): boolean {
   }
 }
 
-interface BoardToolbarProps {
-  onImport?: () => void;
-}
-
-export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
+export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: () => void } = {}) {
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const rootDocument = useBlueprintStore((s) => s.rootDocument);
   const stages = useBlueprintStore((s) => s.stages);
@@ -109,8 +108,6 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const toggleDescriptionVisibleInUserJourney = useBlueprintStore(
     (s) => s.toggleDescriptionVisibleInUserJourney,
   );
-  const newBlueprint = useBlueprintStore((s) => s.newBlueprint);
-  const importEcitesLifecycle = useBlueprintStore((s) => s.importEcitesLifecycle);
   const undo = useBlueprintStore((s) => s.undo);
   const redo = useBlueprintStore((s) => s.redo);
   const canUndo = useBlueprintStore((s) => s.canUndo);
@@ -124,6 +121,8 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const requirements = useBlueprintStore((s) => s.requirements);
   const apiContracts = useBlueprintStore((s) => s.apiContracts);
   const uiScaffolds = useBlueprintStore((s) => s.uiScaffolds);
+  const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
+  const importStoryboardImages = useBlueprintStore((s) => s.importStoryboardImages);
   const readOnly = useBlueprintStore((s) => s.readOnly);
 
   const entries = useLibraryStore((s) => s.entries);
@@ -152,15 +151,14 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
   const [name, setName] = useState(() => blueprintTitleLabel(blueprint.serviceName));
   const [showLanes, setShowLanes] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [showExportDialog, setShowExportDialog] = useState(false);
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [shareStatus, setShareStatus] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle');
-  const [shareError, setShareError] = useState('');
-  const [shareNotice, setShareNotice] = useState('');
+  const [transferDialog, setTransferDialog] = useState<'import' | 'export' | null>(null);
+  const [transferNotice, setTransferNotice] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const nameRef = useRef<HTMLInputElement>(null);
   const lanesTriggerRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const storyboardImportRef = useRef<HTMLInputElement>(null);
+  const backupImportRef = useRef<HTMLInputElement>(null);
 
   const persistableDocument = useBlueprintStore.getState().getPersistableDocument();
 
@@ -187,94 +185,95 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportSvg = () => {
-    const state = useBlueprintStore.getState();
-    const svg = exportBlueprintSvg(state);
-    downloadBlob(
-      new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
-      visualExportFilename(state, 'svg'),
-    );
-    setShowExportDialog(false);
-  };
-
-  const handleExportPdf = () => {
-    const state = useBlueprintStore.getState();
-    const pdf = exportBlueprintPdf(state);
-    downloadBlob(
-      new Blob([pdf], { type: 'application/pdf' }),
-      visualExportFilename(state, 'pdf'),
-    );
-    setShowExportDialog(false);
+  const closeTransferDialog = () => {
+    setTransferDialog(null);
+    setTransferNotice('');
   };
 
   const handleExportSpreadsheet = () => {
+    setTransferNotice('');
     const state = useBlueprintStore.getState();
     const buffer = exportBlueprintSpreadsheet(state);
     downloadBlob(
       new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
       spreadsheetExportFilename(state),
     );
-    setShowExportDialog(false);
+    closeTransferDialog();
+  };
+
+  const handleExportStoryboardImages = () => {
+    setTransferNotice('');
+    const state = useBlueprintStore.getState().getPersistableDocument();
+    const zip = exportStoryboardImagesZip(state);
+    if (!zip) {
+      setTransferNotice('No storyboard images to download on this blueprint.');
+      return;
+    }
+    downloadBlob(new Blob([zip], { type: 'application/zip' }), storyboardImagesExportFilename(state));
+    closeTransferDialog();
+  };
+
+  const handleExportBackup = () => {
+    setTransferNotice('');
+    const state = useBlueprintStore.getState().getPersistableDocument();
+    downloadBlob(
+      new Blob([exportBlueprintBackupJson(state)], { type: 'application/json;charset=utf-8' }),
+      blueprintBackupExportFilename(state),
+    );
+    closeTransferDialog();
+  };
+
+  const handleStoryboardImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    setTransferNotice('');
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const items = await parseStoryboardImagesZip(file);
+      const result = importStoryboardImages(items);
+      if (result.applied === 0) {
+        setTransferNotice('No storyboard images could be matched to this blueprint.');
+        return;
+      }
+      const unmatchedNote =
+        result.unmatched.length > 0
+          ? ` ${result.unmatched.length} image${result.unmatched.length === 1 ? '' : 's'} could not be matched.`
+          : '';
+      setTransferNotice(`Imported ${result.applied} storyboard image${result.applied === 1 ? '' : 's'}.${unmatchedNote}`);
+      if (result.unmatched.length === 0) {
+        closeTransferDialog();
+      }
+    } catch (err) {
+      setTransferNotice(err instanceof Error ? err.message : 'Could not import storyboard images.');
+    }
+  };
+
+  const handleBackupImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    setTransferNotice('');
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const backup = parseBlueprintBackupJson(text);
+      loadBlueprint(backup);
+      setTransferNotice('Blueprint backup imported.');
+      closeTransferDialog();
+    } catch (err) {
+      setTransferNotice(err instanceof Error ? err.message : 'Could not import blueprint backup.');
+    }
+  };
+
+  const handleImportSpreadsheet = () => {
+    closeTransferDialog();
+    onImportSpreadsheet?.();
   };
 
   const handleQuickSaveToLibrary = () => {
     saveToLibrary(useBlueprintStore.getState().getPersistableDocument());
     setSaveStatus('saved');
-  };
-
-  const copyShareUrl = async (url: string) => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(url);
-      return;
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = url;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
-  };
-
-  const handleShare = async () => {
-    setShareStatus('loading');
-    setShareError('');
-    setShareNotice('');
-
-    try {
-      if (readOnly) {
-        await copyShareUrl(window.location.href);
-        setShareStatus('copied');
-        return;
-      }
-
-      const store = useBlueprintStore.getState();
-      const existingShareId = store.blueprint.publishedShareId;
-      const { id, storyboardImagesStripped, shareTextTrimmed } = await publishOrRefreshShare(
-        store.getPersistableDocument(),
-        existingShareId,
-      );
-
-      if (!existingShareId || id !== existingShareId) {
-        store.setPublishedShareId(id);
-      }
-
-      const shareUrl = `${window.location.origin}/view/${encodeURIComponent(id)}`;
-      await copyShareUrl(shareUrl);
-      if (storyboardImagesStripped || shareTextTrimmed) {
-        const parts: string[] = [];
-        if (storyboardImagesStripped) parts.push('storyboard images were not included');
-        if (shareTextTrimmed) parts.push('some text was shortened');
-        setShareNotice(`${parts.join('; ')} (share size limit).`);
-      }
-      setShareStatus('copied');
-    } catch (err) {
-      setShareError(err instanceof Error ? err.message : 'Could not create a share link.');
-      setShareStatus('error');
-    }
   };
 
   useEffect(() => {
@@ -286,16 +285,6 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
     const timeout = window.setTimeout(() => setSaveStatus('idle'), 2000);
     return () => window.clearTimeout(timeout);
   }, [saveStatus]);
-
-  useEffect(() => {
-    if (shareStatus !== 'copied' && shareStatus !== 'error') return;
-    const timeout = window.setTimeout(() => {
-      setShareStatus('idle');
-      setShareError('');
-      setShareNotice('');
-    }, 3500);
-    return () => window.clearTimeout(timeout);
-  }, [shareStatus]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -596,7 +585,7 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
               onClick={() => setShowMenu(!showMenu)}
               aria-expanded={showMenu}
               aria-haspopup="menu"
-              aria-label="More actions"
+              aria-label="Import and export"
               className="inline-flex h-[34px] items-center gap-1 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />
@@ -606,8 +595,8 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                 <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
                 <div
                   role="menu"
-                  aria-label="More actions"
-                  className="absolute right-0 top-full z-40 mt-1 w-48 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-lg"
+                  aria-label="Import and export"
+                  className="absolute right-0 top-full z-40 mt-1 w-44 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-lg"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
                       setShowMenu(false);
@@ -622,113 +611,27 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
                     }
                   }}
                 >
-                  {!readOnly && onImport && (
-                    <>
-                      <button
-                        role="menuitem"
-                        onClick={() => {
-                          onImport();
-                          setShowMenu(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-violet-700 transition-colors hover:bg-violet-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                      >
-                        <Sparkles aria-hidden="true" className="h-3.5 w-3.5" /> Import
-                      </button>
-                      <div className="my-1 h-px bg-neutral-100" />
-                    </>
-                  )}
                   {!readOnly && (
                     <button
                       role="menuitem"
                       onClick={() => {
-                        if (
-                          confirm(
-                            'Replace stages, steps, and sub-steps from the CITES service blueprint spreadsheet? Lane cards will refresh; storyboard images you added are kept.',
-                          )
-                        ) {
-                          importEcitesLifecycle();
-                        }
+                        setTransferDialog('import');
                         setShowMenu(false);
                       }}
                       className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                     >
-                      <Target aria-hidden="true" className="h-3.5 w-3.5" /> Import eCITES lifecycle
+                      <Upload aria-hidden="true" className="h-3.5 w-3.5" /> Import
                     </button>
-                  )}
-                  {!readOnly && (
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setShowLibrary(true);
-                        setShowMenu(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                    >
-                      <BookOpen aria-hidden="true" className="h-3.5 w-3.5" /> Library
-                    </button>
-                  )}
-                  {!readOnly && (
-                    <>
-                      <div className="my-1 h-px bg-neutral-100" />
-                      <button
-                        role="menuitem"
-                        onClick={() => {
-                          newBlueprint();
-                          setShowMenu(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                      >
-                        <Plus aria-hidden="true" className="h-3.5 w-3.5" /> New blueprint
-                      </button>
-                    </>
                   )}
                   <button
                     role="menuitem"
                     onClick={() => {
-                      setShowExportDialog(true);
+                      setTransferDialog('export');
                       setShowMenu(false);
                     }}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
                     <Download aria-hidden="true" className="h-3.5 w-3.5" /> Export
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      void handleShare();
-                    }}
-                    disabled={shareStatus === 'loading'}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      shareStatus === 'copied'
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : shareStatus === 'error'
-                          ? 'bg-red-50 text-red-700'
-                          : 'text-neutral-700 hover:bg-neutral-50',
-                      shareStatus === 'loading' && 'cursor-wait text-neutral-500',
-                    )}
-                    title={
-                      shareStatus === 'error'
-                        ? shareError
-                        : shareStatus === 'copied' && shareNotice
-                          ? shareNotice
-                          : undefined
-                    }
-                  >
-                    {shareStatus === 'copied' ? (
-                      <Check aria-hidden="true" className="h-3.5 w-3.5" />
-                    ) : shareStatus === 'error' ? (
-                      <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" />
-                    ) : (
-                      <Share2 aria-hidden="true" className="h-3.5 w-3.5" />
-                    )}
-                    {shareStatus === 'loading'
-                      ? 'Creating link...'
-                      : shareStatus === 'copied'
-                        ? 'Link copied'
-                        : shareStatus === 'error'
-                          ? 'Share failed'
-                          : 'Copy share link'}
                   </button>
                 </div>
               </>
@@ -737,50 +640,113 @@ export function BoardToolbar({ onImport }: BoardToolbarProps = {}) {
         </div>
       </header>
 
-      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+      <Dialog open={transferDialog !== null} onOpenChange={(open) => {
+        if (!open) closeTransferDialog();
+      }}>
         <DialogContent className="gap-5 p-5 sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Export blueprint</DialogTitle>
+            <DialogTitle>{transferDialog === 'import' ? 'Import' : 'Export'}</DialogTitle>
             <DialogDescription>
-              Choose an export format for the full board.
+              {transferDialog === 'import'
+                ? 'Bring storyboard images, a spreadsheet, or a full backup into this blueprint.'
+                : 'Download storyboard images, a spreadsheet, or a full backup from this blueprint.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={handleExportSpreadsheet}
-              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 sm:col-span-2"
-            >
-              <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
-              <span className="text-xs leading-5 text-neutral-500">
-                Excel file with all stages, steps, sub-steps, lanes and card content.
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={handleExportSvg}
-              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <span className="text-sm font-semibold text-neutral-900">SVG</span>
-              <span className="text-xs leading-5 text-neutral-500">
-                Editable vector artwork for design tools and documentation.
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={handleExportPdf}
-              className="flex min-h-28 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <span className="text-sm font-semibold text-neutral-900">PDF</span>
-              <span className="text-xs leading-5 text-neutral-500">
-                Portable document for sharing, review, and lightweight printing.
-              </span>
-            </button>
-          </div>
+          {transferNotice ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {transferNotice}
+            </p>
+          ) : null}
+          <input
+            ref={storyboardImportRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={handleStoryboardImportFile}
+          />
+          <input
+            ref={backupImportRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleBackupImportFile}
+          />
+          {transferDialog === 'import' ? (
+            readOnly ? (
+              <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+                Import is not available on read-only shared links. Open the main app to import files.
+              </p>
+            ) : (
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={() => storyboardImportRef.current?.click()}
+                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <span className="text-sm font-semibold text-neutral-900">Storyboard images (zip)</span>
+                  <span className="text-xs leading-5 text-neutral-500">
+                    Reattach pictures exported from another browser or machine.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImportSpreadsheet}
+                  disabled={!onImportSpreadsheet}
+                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
+                  <span className="text-xs leading-5 text-neutral-500">
+                    Import stages, steps, lanes and card content from Excel or CSV.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => backupImportRef.current?.click()}
+                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <span className="text-sm font-semibold text-neutral-900">Full backup (JSON)</span>
+                  <span className="text-xs leading-5 text-neutral-500">
+                    Load a complete blueprint backup, including storyboard images.
+                  </span>
+                </button>
+              </div>
+            )
+          ) : (
+            <div className="grid gap-2">
+              <button
+                type="button"
+                onClick={handleExportStoryboardImages}
+                className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <span className="text-sm font-semibold text-neutral-900">Storyboard images (zip)</span>
+                <span className="text-xs leading-5 text-neutral-500">
+                  All storyboard pictures as image files, plus a manifest for reimporting later.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportSpreadsheet}
+                className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
+                <span className="text-xs leading-5 text-neutral-500">
+                  Excel file with all stages, steps, sub-steps, lanes and card content.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportBackup}
+                className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <span className="text-sm font-semibold text-neutral-900">Full backup (JSON)</span>
+                <span className="text-xs leading-5 text-neutral-500">
+                  Complete copy of this blueprint for moving between browsers or machines.
+                </span>
+              </button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
-
-      <LibrarySheet open={showLibrary} onClose={() => setShowLibrary(false)} />
     </>
   );
 }

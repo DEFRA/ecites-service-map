@@ -98,7 +98,7 @@ export default function ViewSharePage() {
   // loadSharedSnapshot) will be honoured to disable editing.
   return (
     <div className="flex h-screen flex-col bg-[#fafafa]">
-      <BoardToolbar onImport={() => { /* no-op in read-only */ }} />
+      <BoardToolbar />
       {stages.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-neutral-500">
           This shared blueprint is empty.

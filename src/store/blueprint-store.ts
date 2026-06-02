@@ -40,6 +40,11 @@ import { DEFAULT_LANES, L1_MACRO_LANES, L1_MACRO_LANE_KEYS, L3_LANE_KEYS } from 
 import { createSeedBlueprint } from '@/lib/seed-data';
 import { loadBundledCitesBlueprint, repairStaleCitesBlueprint } from '@/lib/import/cites-matrix';
 import { buildEcitesLifecycleEntities } from '@/lib/ecites-lifecycle-data';
+import {
+  mergeStoryboardImagesIntoRoot,
+  type StoryboardImportItem,
+  type StoryboardImportResult,
+} from '@/lib/import-storyboard-images';
 import { relinkOrphanedStoryboardImages, storyboardColumnKey } from '@/lib/storyboard-images';
 import { getLanePrefix } from '@/lib/traceability/registry';
 import { generateTraceabilityCode } from '@/lib/traceability/service';
@@ -640,6 +645,7 @@ interface BlueprintStore extends BlueprintState {
   addStoryboardImage: (target: StoryboardAttachTarget, dataUrl: string) => string;
   updateStoryboardImage: (id: string, dataUrl: string) => void;
   removeStoryboardImage: (id: string) => void;
+  importStoryboardImages: (imports: StoryboardImportItem[]) => StoryboardImportResult;
   toggleStoryboardVisible: () => void;
   toggleStoryboardCollapsed: () => void;
   toggleStepHeadersVisible: () => void;
@@ -2383,6 +2389,32 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
         canRedo: false,
       };
     });
+  },
+
+  importStoryboardImages: (imports) => {
+    let result: StoryboardImportResult = { applied: 0, unmatched: [] };
+    set((s) => {
+      const currentRoot = cloneDocumentState(toPersistableSnapshot(pickDocumentState(s)));
+      const merged = mergeStoryboardImagesIntoRoot(currentRoot, imports);
+      result = merged.result;
+      if (merged.result.applied === 0) return s;
+
+      const loaded = cloneDocumentState(normalizeState(repairStaleCitesBlueprint(merged.document)));
+      const nextPast = [...s._past, cloneDocumentState(pickDocumentState(s))].slice(-HISTORY_LIMIT);
+      persist(loaded);
+      return {
+        ...s,
+        ...loaded,
+        rootDocument: null,
+        activeBlueprintId: loaded.blueprint.id,
+        rootBlueprintId: loaded.blueprint.id,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return result;
   },
 
   removeStoryboardImage: (id) => {

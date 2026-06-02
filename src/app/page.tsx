@@ -73,7 +73,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen min-w-0 flex-col overflow-x-hidden bg-[#fafafa]">
-      <BoardToolbar onImport={() => setShowImport(true)} />
+      <BoardToolbar onImportSpreadsheet={() => setShowImport(true)} />
       {stages.length === 0 ? (
         <EmptyState onImport={() => setShowImport(true)} />
       ) : (
