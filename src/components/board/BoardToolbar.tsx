@@ -209,7 +209,10 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
       setTransferNotice('No storyboard images to download on this blueprint.');
       return;
     }
-    downloadBlob(new Blob([zip], { type: 'application/zip' }), storyboardImagesExportFilename(state));
+    downloadBlob(
+      new Blob([new Uint8Array(zip)], { type: 'application/zip' }),
+      storyboardImagesExportFilename(state),
+    );
     closeTransferDialog();
   };
 

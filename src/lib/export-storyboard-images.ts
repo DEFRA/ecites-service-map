@@ -18,7 +18,7 @@ function mimeToExt(mime: string): string {
 }
 
 function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; ext: string } | null {
-  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
+  const match = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(dataUrl);
   if (!match) return null;
 
   const mime = match[1] || 'image/png';
