@@ -28,6 +28,7 @@ import {
   type UiScaffold,
   type StrategicGoal,
   type Outcome,
+  type PainPointRecord,
 } from '@/lib/types';
 import type { StoryboardAttachTarget } from '@/lib/storyboard-images';
 import { useLibraryStore } from '@/store/library-store';
@@ -39,7 +40,14 @@ import {
 import { DEFAULT_LANES, L1_MACRO_LANES, L1_MACRO_LANE_KEYS, L3_LANE_KEYS } from '@/lib/lane-definitions';
 import { createSeedBlueprint } from '@/lib/seed-data';
 import { loadBundledCitesBlueprint, repairStaleCitesBlueprint } from '@/lib/import/cites-matrix';
+import {
+  parseCodedLaneItem,
+  splitCellItems,
+  splitEmbeddedCodedLaneItems,
+} from '@/lib/import/normalize';
 import { buildEcitesLifecycleEntities } from '@/lib/ecites-lifecycle-data';
+import { isJourneyFilterLane } from '@/lib/journey-lane-filter';
+import { mergePainPointRecords } from '@/lib/pain-point-records';
 import {
   mergeStoryboardImagesIntoRoot,
   type StoryboardImportItem,
@@ -194,6 +202,53 @@ function expandMergedTypedTraceableCards(cards: Card[]): Card[] {
       });
     });
   });
+
+  return expanded;
+}
+
+function capitalizeCardTitle(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const firstLetterIndex = trimmed.search(/[A-Za-z]/);
+  if (firstLetterIndex === -1) return trimmed;
+  return `${trimmed.slice(0, firstLetterIndex)}${trimmed[firstLetterIndex].toUpperCase()}${trimmed.slice(firstLetterIndex + 1)}`;
+}
+
+function parseCodedLaneItemForCard(raw: string): { traceabilityCode?: string; text: string } {
+  return parseCodedLaneItem(raw);
+}
+
+/** Split pain point / user need cards that contain multiple inline-coded items in one title. */
+function expandMergedCodedLaneCards(cards: Card[]): Card[] {
+  const expanded: Card[] = [];
+
+  for (const card of cards) {
+    if (card.laneKey !== 'pain_point' && card.laneKey !== 'user_need') {
+      expanded.push(card);
+      continue;
+    }
+
+    const items = splitCellItems(card.title).flatMap((item) => splitEmbeddedCodedLaneItems(item));
+    if (items.length <= 1) {
+      expanded.push(card);
+      continue;
+    }
+
+    items.forEach((rawItem, index) => {
+      const parsed = parseCodedLaneItemForCard(rawItem);
+      const title = capitalizeCardTitle(parsed.text || rawItem);
+      if (!title.trim()) return;
+
+      expanded.push({
+        ...card,
+        id: index === 0 ? card.id : uuid(),
+        title,
+        body: index === 0 ? card.body : '',
+        traceabilityCode: parsed.traceabilityCode ?? (index === 0 ? card.traceabilityCode : undefined),
+        order: card.order + index,
+      });
+    });
+  }
 
   return expanded;
 }
@@ -356,7 +411,9 @@ function normalizeChildTreeNode(child: BlueprintState, parent: BlueprintState): 
   const normalizedChildCards = removeEvidenceReferencePainPointCards(
     removeAreaReferenceBehaviourChangeCards(
       migrateStandaloneBehaviourChangeRollupCards(
-        expandMergedTypedTraceableCards(child.cards ?? [])
+        expandMergedTypedTraceableCards(
+          expandMergedCodedLaneCards(child.cards ?? []),
+        )
           .map(sanitizeTypedTraceableLaneCard)
           .map(stripOpportunityTraceText)
           .map(stripRollupText)
@@ -467,6 +524,7 @@ function normalizeState(state: BlueprintState): BlueprintState {
     userJourneys: state.userJourneys ?? [],
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
+    painPointRecords: { ...(state.painPointRecords ?? {}) },
     cardLinks: state.cardLinks ?? [],
     evidence: state.evidence ?? [],
     opportunities: state.opportunities ?? [],
@@ -526,7 +584,9 @@ function normalizeState(state: BlueprintState): BlueprintState {
   const cards = removeEvidenceReferencePainPointCards(
     removeAreaReferenceBehaviourChangeCards(
       migrateStandaloneBehaviourChangeRollupCards(
-        expandMergedTypedTraceableCards(migrated.cards).map((originalCard) => {
+        expandMergedTypedTraceableCards(
+          expandMergedCodedLaneCards(migrated.cards),
+        ).map((originalCard) => {
           const card = stripBehaviourChangeEvidenceBasis(
             stripRollupText(stripOpportunityTraceText(sanitizeTypedTraceableLaneCard(originalCard))),
           );
@@ -646,6 +706,8 @@ interface BlueprintStore extends BlueprintState {
   updateStoryboardImage: (id: string, dataUrl: string) => void;
   removeStoryboardImage: (id: string) => void;
   importStoryboardImages: (imports: StoryboardImportItem[]) => StoryboardImportResult;
+  /** Merge Jira pain point metadata keyed by issue key (e.g. CTS-95). */
+  importPainPointRecords: (records: Record<string, PainPointRecord>) => number;
   toggleStoryboardVisible: () => void;
   toggleStoryboardCollapsed: () => void;
   toggleStepHeadersVisible: () => void;
@@ -753,6 +815,7 @@ function emptyBlueprint(): BlueprintState {
     userJourneys: [],
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
+    painPointRecords: {},
     cardLinks: [],
     evidence: [],
     opportunities: [],
@@ -803,6 +866,7 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     })),
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
+    painPointRecords: { ...(state.painPointRecords ?? {}) },
     cardLinks: state.cardLinks,
     evidence: state.evidence,
     opportunities: state.opportunities,
@@ -899,6 +963,7 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     })),
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
+    painPointRecords: { ...(state.painPointRecords ?? {}) },
     cardLinks: (state.cardLinks ?? []).map((l) => ({ ...l })),
     evidence: (state.evidence ?? []).map((e) => ({ ...e })),
     opportunities: (state.opportunities ?? []).map((o) => ({
@@ -1024,6 +1089,7 @@ function persist(state: BlueprintState) {
     userJourneys: forDisk.userJourneys ?? [],
     activeUserJourneyId: forDisk.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: forDisk.descriptionVisibleInUserJourney ?? false,
+    painPointRecords: { ...(forDisk.painPointRecords ?? {}) },
     cardLinks: forDisk.cardLinks,
     evidence: forDisk.evidence,
     opportunities: forDisk.opportunities,
@@ -2067,6 +2133,7 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
   },
 
   toggleLaneCollapsed: (key) => {
+    if (isJourneyFilterLane(key)) return;
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
       const nextDocument = cloneDocumentState({
@@ -2415,6 +2482,35 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       };
     });
     return result;
+  },
+
+  importPainPointRecords: (records) => {
+    let merged = 0;
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const painPointRecords = mergePainPointRecords(current.painPointRecords, records);
+      merged = Object.keys(records).length;
+      if (merged === 0) return s;
+
+      const nextDocument = cloneDocumentState({
+        ...current,
+        painPointRecords,
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return merged;
   },
 
   removeStoryboardImage: (id) => {

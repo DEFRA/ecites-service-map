@@ -130,6 +130,17 @@ export interface Card {
   derivedFromIds?: string[];
 }
 
+/** Metadata imported from a Jira pain point export, keyed by issue key (e.g. CTS-95). */
+export interface PainPointRecord {
+  issueKey: string;
+  summary: string;
+  status: string;
+  description: string;
+  issueType?: string;
+  parentKey?: string;
+  parentSummary?: string;
+}
+
 export const LANE_KEYS = [
   // L2 Micro lanes
   'actor',
@@ -453,6 +464,8 @@ export interface BlueprintState {
   activeUserJourneyId?: string | null;
   /** When a user journey is active, show the hierarchy description row if true. */
   descriptionVisibleInUserJourney?: boolean;
+  /** Jira pain point metadata keyed by issue key (e.g. CTS-95). */
+  painPointRecords?: Record<string, PainPointRecord>;
   cardLinks: CardLink[];
   evidence: Evidence[];
   opportunities: Opportunity[];

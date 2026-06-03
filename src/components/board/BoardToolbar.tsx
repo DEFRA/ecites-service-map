@@ -32,6 +32,7 @@ import {
   parseBlueprintBackupJson,
   parseStoryboardImagesZip,
 } from '@/lib/import-storyboard-images';
+import { parsePainPointFile } from '@/lib/pain-point-records';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
 import { activeUserJourney, userJourneyHeading } from '@/lib/user-journey';
 import type { Card, Opportunity } from '@/lib/types';
@@ -123,6 +124,7 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
   const uiScaffolds = useBlueprintStore((s) => s.uiScaffolds);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
   const importStoryboardImages = useBlueprintStore((s) => s.importStoryboardImages);
+  const importPainPointRecords = useBlueprintStore((s) => s.importPainPointRecords);
   const readOnly = useBlueprintStore((s) => s.readOnly);
 
   const entries = useLibraryStore((s) => s.entries);
@@ -159,6 +161,7 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const storyboardImportRef = useRef<HTMLInputElement>(null);
   const backupImportRef = useRef<HTMLInputElement>(null);
+  const painPointImportRef = useRef<HTMLInputElement>(null);
 
   const persistableDocument = useBlueprintStore.getState().getPersistableDocument();
 
@@ -266,6 +269,32 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
       closeTransferDialog();
     } catch (err) {
       setTransferNotice(err instanceof Error ? err.message : 'Could not import blueprint backup.');
+    }
+  };
+
+  const handlePainPointImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    setTransferNotice('');
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const result = await parsePainPointFile(file);
+      if (result.errors.length > 0) {
+        setTransferNotice(result.errors[0] ?? 'Could not import pain point details.');
+        return;
+      }
+      if (result.imported === 0) {
+        setTransferNotice('No pain point rows found in this file.');
+        return;
+      }
+      importPainPointRecords(result.records);
+      setTransferNotice(
+        `Imported ${result.imported} pain point record${result.imported === 1 ? '' : 's'}.`,
+      );
+      closeTransferDialog();
+    } catch (err) {
+      setTransferNotice(err instanceof Error ? err.message : 'Could not import pain point details.');
     }
   };
 
@@ -651,7 +680,7 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
             <DialogTitle>{transferDialog === 'import' ? 'Import' : 'Export'}</DialogTitle>
             <DialogDescription>
               {transferDialog === 'import'
-                ? 'Bring storyboard images, a spreadsheet, or a full backup into this blueprint.'
+                ? 'Bring storyboard images, a spreadsheet, pain point details, or a full backup into this blueprint.'
                 : 'Download storyboard images, a spreadsheet, or a full backup from this blueprint.'}
             </DialogDescription>
           </DialogHeader>
@@ -673,6 +702,13 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
             accept=".json,application/json"
             className="hidden"
             onChange={handleBackupImportFile}
+          />
+          <input
+            ref={painPointImportRef}
+            type="file"
+            accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            className="hidden"
+            onChange={handlePainPointImportFile}
           />
           {transferDialog === 'import' ? (
             readOnly ? (
@@ -700,6 +736,16 @@ export function BoardToolbar({ onImportSpreadsheet }: { onImportSpreadsheet?: ()
                   <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
                   <span className="text-xs leading-5 text-neutral-500">
                     Import stages, steps, lanes and card content from Excel or CSV.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => painPointImportRef.current?.click()}
+                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <span className="text-sm font-semibold text-neutral-900">Pain point details</span>
+                  <span className="text-xs leading-5 text-neutral-500">
+                    Import summary, status and description from a Jira CSV or Excel export.
                   </span>
                 </button>
                 <button

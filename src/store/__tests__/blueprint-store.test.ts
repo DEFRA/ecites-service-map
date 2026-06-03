@@ -277,6 +277,83 @@ describe('blueprint journey state', () => {
     expect(card?.traceabilityCode).toBe('UN-070');
   });
 
+  it('splits merged inline-coded pain points into separate cards on load', () => {
+    const stateWithMergedPainPoints = makeFixture({
+      cards: [
+        makeCard({
+          id: 'pp-merged',
+          laneKey: 'pain_point',
+          title: 'CTS-100 Guidance is unclear\nCTS-101 Forms are confusing',
+          order: 0,
+          traceabilityCode: 'PP-070',
+        }),
+      ],
+    });
+
+    useBlueprintStore.getState().loadBlueprint(stateWithMergedPainPoints);
+
+    const painPointCards = useBlueprintStore
+      .getState()
+      .cards.filter((card) => card.laneKey === 'pain_point')
+      .sort((a, b) => a.order - b.order);
+
+    expect(painPointCards).toHaveLength(2);
+    expect(painPointCards.map((card) => card.traceabilityCode)).toEqual(['CTS-100', 'CTS-101']);
+    expect(painPointCards.map((card) => card.title)).toEqual([
+      'Guidance is unclear',
+      'Forms are confusing',
+    ]);
+  });
+
+  it('splits code-only pain point references into separate cards on load', () => {
+    const stateWithMergedPainPoints = makeFixture({
+      cards: [
+        makeCard({
+          id: 'pp-merged',
+          laneKey: 'pain_point',
+          title: 'CTS-77 CTS-95',
+          order: 0,
+          traceabilityCode: 'PP-070',
+        }),
+      ],
+    });
+
+    useBlueprintStore.getState().loadBlueprint(stateWithMergedPainPoints);
+
+    const painPointCards = useBlueprintStore
+      .getState()
+      .cards.filter((card) => card.laneKey === 'pain_point')
+      .sort((a, b) => a.order - b.order);
+
+    expect(painPointCards).toHaveLength(2);
+    expect(painPointCards.map((card) => card.traceabilityCode)).toEqual(['CTS-77', 'CTS-95']);
+    expect(painPointCards.map((card) => card.title)).toEqual(['CTS-77', 'CTS-95']);
+  });
+
+  it('splits single- and four-digit code-only pain points on load', () => {
+    const stateWithMergedPainPoints = makeFixture({
+      cards: [
+        makeCard({
+          id: 'pp-merged',
+          laneKey: 'pain_point',
+          title: 'CTS-1 CTS-1000',
+          order: 0,
+          traceabilityCode: 'PP-070',
+        }),
+      ],
+    });
+
+    useBlueprintStore.getState().loadBlueprint(stateWithMergedPainPoints);
+
+    const painPointCards = useBlueprintStore
+      .getState()
+      .cards.filter((card) => card.laneKey === 'pain_point')
+      .sort((a, b) => a.order - b.order);
+
+    expect(painPointCards).toHaveLength(2);
+    expect(painPointCards.map((card) => card.traceabilityCode)).toEqual(['CTS-1', 'CTS-1000']);
+  });
+
   it('moves persisted pain-point roll-up suffixes into drawer traceability on load', () => {
     const stateWithPainPoint = makeFixture({
       cards: [

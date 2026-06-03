@@ -10,6 +10,10 @@ import { cn } from '@/lib/utils';
 import { getCardColorTokens } from './LaneLabel';
 import { CardTagEditor, getReusableTagSuggestions } from './CardTagEditor';
 import { stripRollupsForCardDisplay, stripTraceabilityForDisplay } from '@/lib/traceability/display';
+import {
+  extractPainPointIssueKey,
+  formatPainPointHeading,
+} from '@/lib/pain-point-records';
 
 interface BlueprintCardProps {
   card: Card;
@@ -23,6 +27,7 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
   const selectCard = useBlueprintStore((s) => s.selectCard);
   const selectedCardId = useBlueprintStore((s) => s.selectedCardId);
   const readOnly = useBlueprintStore((s) => s.readOnly);
+  const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
   const isSelected = selectedCardId === card.id;
 
   const [editing, setEditing] = useState(false);
@@ -134,7 +139,13 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
   }
 
   const laneToken = getCardColorTokens(card.laneKey, card.tags);
-  const displayTitle = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.title));
+  const baseTitle = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.title));
+  const issueKey = card.laneKey === 'pain_point' ? extractPainPointIssueKey(card) : null;
+  const painRecord = issueKey ? painPointRecords[issueKey] : undefined;
+  const displayTitle =
+    card.laneKey === 'pain_point' && issueKey
+      ? formatPainPointHeading(issueKey, painRecord?.summary, baseTitle)
+      : baseTitle;
   const displayBody = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.body));
 
   return (

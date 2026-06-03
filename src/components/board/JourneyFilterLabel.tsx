@@ -24,7 +24,7 @@ const ALL_LABEL: Record<JourneyFilterLaneKey, string> = {
   actor: 'All actors',
   system: 'All systems',
   user_need: 'All user needs',
-  pain_point: 'All pain points',
+  pain_point: 'All statuses',
 };
 
 const FOCUS_RING: Record<JourneyFilterLaneKey, string> = {

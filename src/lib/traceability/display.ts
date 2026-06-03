@@ -1,6 +1,6 @@
-const TRACEABILITY_CODE_PATTERN = /\b[A-Z]{1,5}-\d{3,}\b/g;
-const LEADING_CODE_PATTERN = /^\s*([A-Z]{1,5}-\d{3,})(?:\s*[:\-]\s*|\s+)/;
-const EVIDENCE_PATTERN = /\s*Evidence(?:\s+includes|:)[^.]*\b[A-Z]{1,5}-\d{3,}\b[^.]*\.?/gi;
+const TRACEABILITY_CODE_PATTERN = /\b[A-Z]{1,5}-\d+\b/g;
+const LEADING_CODE_PATTERN = /^\s*([A-Z]{1,5}-\d+)(?:\s*[:\-]\s*|\s+)/;
+const EVIDENCE_PATTERN = /\s*Evidence(?:\s+includes|:)[^.]*\b[A-Z]{1,5}-\d+\b[^.]*\.?/gi;
 const ROLLS_UP_PATTERN = /\s*\[\s*Rolls up\b[^\]]*\]\s*/gi;
 
 export function stripTraceabilityForDisplay(value: string) {

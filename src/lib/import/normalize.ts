@@ -171,6 +171,25 @@ export function splitCellItems(cell: string): string[] {
     .filter(Boolean);
 }
 
+/** Inline traceability code token, e.g. CTS-1, CTS-77, PP-001, CTS-1000 */
+export const INLINE_TRACEABILITY_CODE = /[A-Z]{1,5}-\d+/;
+
+/**
+ * Split merged cell text when multiple inline codes appear in one segment,
+ * e.g. "CTS-77 CTS-95" or "CTS-1 First issue CTS-1000 Second issue".
+ */
+export function splitEmbeddedCodedLaneItems(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const parts = trimmed.split(new RegExp(`(?=\\b${INLINE_TRACEABILITY_CODE.source}\\b)`, 'g'));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/** Split a spreadsheet cell into individual card items (lines, bullets, inline codes). */
+export function splitLaneCellItems(cell: string): string[] {
+  return splitCellItems(cell).flatMap((item) => splitEmbeddedCodedLaneItems(item));
+}
+
 /**
  * Parses an optional inline traceability code from the start of a card item.
  *
@@ -180,12 +199,17 @@ export function splitCellItems(cell: string): string[] {
  *   "Validation unclear"         → { text: "Validation unclear" }
  *
  * The prefix must be one or more uppercase letters followed by a hyphen and
- * three or more digits. Everything after the first whitespace is the card text.
+ * one or more digits. Everything after the first whitespace is the card text.
  *
  * Exported so tests can exercise it directly.
  */
 export function parseInlineId(raw: string): { traceabilityCode?: string; text: string } {
-  const match = raw.match(/^([A-Z]+-\d{3,})\s+(.+)$/);
+  const trimmed = raw.trim();
+  const codeOnly = trimmed.match(/^([A-Z]{1,5}-\d+)$/);
+  if (codeOnly) {
+    return { traceabilityCode: codeOnly[1], text: codeOnly[1] };
+  }
+  const match = trimmed.match(/^([A-Z]{1,5}-\d+)\s+(.+)$/);
   if (match) {
     return { traceabilityCode: match[1], text: match[2].trim() };
   }
@@ -193,11 +217,18 @@ export function parseInlineId(raw: string): { traceabilityCode?: string; text: s
 }
 
 export function parseLeadingCodeLabel(raw: string): { traceabilityCode?: string; text: string } {
-  const match = raw.match(/^([A-Z]+-\d{3,})\s*:\s+(.+)$/);
+  const match = raw.trim().match(/^([A-Z]{1,5}-\d+)\s*:\s+(.+)$/);
   if (match) {
     return { traceabilityCode: match[1], text: match[2].trim() };
   }
   return { text: raw };
+}
+
+/** Parse a pain point / user need cell item that may be code-only or code + text. */
+export function parseCodedLaneItem(raw: string): { traceabilityCode?: string; text: string } {
+  const leadingCode = parseLeadingCodeLabel(raw);
+  if (leadingCode.traceabilityCode) return leadingCode;
+  return parseInlineId(raw);
 }
 
 /**
@@ -981,7 +1012,9 @@ export function normalizeSwimlaneMatrix(
 
       const normalizedItems = laneKey === 'performance_indicators'
         ? items.flatMap((item) => splitEmbeddedTypedLaneItems(item))
-        : items;
+        : laneKey === 'pain_point' || laneKey === 'user_need'
+          ? items.flatMap((item) => splitEmbeddedCodedLaneItems(item))
+          : items;
 
       normalizedItems.forEach((rawItem, idx) => {
         // Some L1 macro lanes may carry both a type label and a traceability code.
@@ -1418,7 +1451,9 @@ export function normalizeMultiTabBlueprint(
           const items = splitCellItems(cellValue);
           const normalizedItems = laneKey === 'performance_indicators'
             ? items.flatMap((item) => splitEmbeddedTypedLaneItems(item))
-            : items;
+            : laneKey === 'pain_point' || laneKey === 'user_need'
+              ? items.flatMap((item) => splitEmbeddedCodedLaneItems(item))
+              : items;
           normalizedItems.forEach((rawItem, itemIdx) => {
             const parsedItem = laneKey === 'performance_indicators' || laneKey === 'opportunities_lane'
               ? parseTypedTraceableLaneItem(rawItem)

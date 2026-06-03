@@ -35,6 +35,7 @@ import { BOARD_STEP_WIDTH, BOARD_ADD_COLUMN_WIDTH, boardContentWidth, boardColum
 import { buildL1BoardLayout } from '@/lib/board-columns';
 import {
   collectJourneyLaneTypes,
+  collectPainPointStatuses,
   countHiddenJourneyLaneTypes,
   displayJourneyLaneCards,
   filterL1BoardLayout,
@@ -203,6 +204,7 @@ export function Board() {
   const setUserNeedJourneyFilter = useBlueprintStore((s) => s.setUserNeedJourneyFilter);
   const painPointJourneyFilter = useBlueprintStore((s) => s.painPointJourneyFilter ?? null);
   const setPainPointJourneyFilter = useBlueprintStore((s) => s.setPainPointJourneyFilter);
+  const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
   const userJourneys = useBlueprintStore((s) => s.userJourneys ?? []);
   const activeUserJourneyId = useBlueprintStore((s) => s.activeUserJourneyId ?? null);
   const descriptionVisibleInUserJourney = useBlueprintStore(
@@ -433,8 +435,8 @@ export function Board() {
     [cards, l1Layout],
   );
   const painPointTypes = useMemo(
-    () => collectJourneyLaneTypes(cards, l1Layout, 'pain_point'),
-    [cards, l1Layout],
+    () => collectPainPointStatuses(cards, painPointRecords),
+    [cards, painPointRecords],
   );
 
   const journeyFilterLaneConfig = useMemo(
@@ -477,7 +479,7 @@ export function Board() {
       system: systemJourneyFilter,
       user_need: userNeedJourneyFilter,
       pain_point: painPointJourneyFilter,
-    });
+    }, l1Layout, painPointRecords);
     if (laneFilterIds) sets.push(laneFilterIds);
     if (sets.length === 0) return null;
     return intersectSubStepIdSets(sets);
@@ -488,6 +490,8 @@ export function Board() {
     userNeedJourneyFilter,
     painPointJourneyFilter,
     activeJourney,
+    l1Layout,
+    painPointRecords,
   ]);
 
   const displayL1Layout = useMemo(() => {
@@ -613,12 +617,24 @@ export function Board() {
     [journeyFilterLaneConfig],
   );
 
+  const journeyFilterOptionsForLane = useCallback(
+    (laneKey: LaneKey) =>
+      laneKey === 'pain_point'
+        ? { laneKey, painPointRecords }
+        : undefined,
+    [painPointRecords],
+  );
+
   const displayLaneCellCards = useCallback(
     (cellCards: Card[], laneKey: LaneKey): Card[] => {
       if (!isJourneyFilterLane(laneKey)) return cellCards;
-      return displayJourneyLaneCards(cellCards, journeyFilterForLane(laneKey));
+      return displayJourneyLaneCards(
+        cellCards,
+        journeyFilterForLane(laneKey),
+        journeyFilterOptionsForLane(laneKey),
+      );
     },
-    [journeyFilterForLane],
+    [journeyFilterForLane, journeyFilterOptionsForLane],
   );
 
   const hiddenJourneyTypesInCell = useCallback(
@@ -626,9 +642,13 @@ export function Board() {
       if (!isJourneyFilterLane(laneKey)) return 0;
       const filter = journeyFilterForLane(laneKey);
       if (!filter) return 0;
-      return countHiddenJourneyLaneTypes(cellCards, filter);
+      return countHiddenJourneyLaneTypes(
+        cellCards,
+        filter,
+        journeyFilterOptionsForLane(laneKey),
+      );
     },
-    [journeyFilterForLane],
+    [journeyFilterForLane, journeyFilterOptionsForLane],
   );
 
   const getCardsForCell = useCallback(
@@ -654,20 +674,39 @@ export function Board() {
     return map;
   }, [cards]);
 
+  const subStepById = useMemo(
+    () => new Map(subSteps.map((subStep) => [subStep.id, subStep])),
+    [subSteps],
+  );
+
   const getCardsForSubStepCell = useCallback(
     (subStepId: string, laneKey: LaneKey): Card[] => {
-      const cellCards = subStepCardsMap.get(`${subStepId}::${laneKey}`) || [];
+      const subStepCards = subStepCardsMap.get(`${subStepId}::${laneKey}`) || [];
+      const subStep = subStepById.get(subStepId);
+      const stepLevelCards = subStep
+        ? cards.filter(
+            (card) => card.stepId === subStep.stepId && !card.subStepId && card.laneKey === laneKey,
+          )
+        : [];
+      const cellCards = [...subStepCards, ...stepLevelCards].sort((a, b) => a.order - b.order);
       return displayLaneCellCards(cellCards, laneKey);
     },
-    [subStepCardsMap, displayLaneCellCards],
+    [subStepCardsMap, subStepById, cards, displayLaneCellCards],
   );
 
   const getHiddenActorCountForSubStepCell = useCallback(
     (subStepId: string, laneKey: LaneKey): number => {
-      const cellCards = subStepCardsMap.get(`${subStepId}::${laneKey}`) || [];
+      const subStepCards = subStepCardsMap.get(`${subStepId}::${laneKey}`) || [];
+      const subStep = subStepById.get(subStepId);
+      const stepLevelCards = subStep
+        ? cards.filter(
+            (card) => card.stepId === subStep.stepId && !card.subStepId && card.laneKey === laneKey,
+          )
+        : [];
+      const cellCards = [...subStepCards, ...stepLevelCards];
       return hiddenJourneyTypesInCell(cellCards, laneKey);
     },
-    [subStepCardsMap, hiddenJourneyTypesInCell],
+    [subStepCardsMap, subStepById, cards, hiddenJourneyTypesInCell],
   );
 
   const getHiddenActorCountForCell = useCallback(

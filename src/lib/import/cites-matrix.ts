@@ -24,7 +24,7 @@ import { DEFAULT_LANES } from '../lane-definitions';
 import { validateLaneKey } from './validate';
 import { CITES_BLUEPRINT_CSV } from './cites-blueprint-csv';
 import { relinkOrphanedStoryboardImages, remapStoryboardImages } from '../storyboard-images';
-import { splitCellItems } from './normalize';
+import { parseInlineId, parseCodedLaneItem, splitLaneCellItems } from './normalize';
 import { isJourneyInclusionMark } from '../user-journey';
 
 function capitalizeSentenceStart(text: string): string {
@@ -109,6 +109,8 @@ function emptyImportState(bpId: string, ts: string, serviceName: string): Bluepr
     subStepHeadersVisible: true,
     actorJourneyFilter: null,
     systemJourneyFilter: null,
+    userNeedJourneyFilter: null,
+    painPointJourneyFilter: null,
     userJourneys: [],
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
@@ -482,15 +484,22 @@ export function normalizeCitesBlueprintMatrix(
       const subStep = colToSubStep.get(colIdx);
       if (!subStep) continue;
       const cellValue = cells[colIdx] ?? '';
-      const items = splitCellItems(cellValue);
+      const items = splitLaneCellItems(cellValue);
       for (const item of items) {
         const stage = stageMap.get(filledStages[colIdx])!;
         const stepKey = `${filledStages[colIdx]}::${filledSteps[colIdx]}`;
         const step = stepMap.get(stepKey)!;
+        const parsed = parseCodedLaneItem(item);
+        const title = capitalizeSentenceStart(parsed.text || item);
+        const inlineCode = parsed.traceabilityCode;
         const { ref, updatedCounters: sc } = generateSourceRef(srcType, srcCounters);
         srcCounters = sc;
-        const { code, updatedCounters: tc } = generateTraceabilityCode(getLanePrefix(laneKey), traceCounters);
-        traceCounters = tc;
+        let cardTraceCode = inlineCode;
+        if (!cardTraceCode) {
+          const { code, updatedCounters: tc } = generateTraceabilityCode(getLanePrefix(laneKey), traceCounters);
+          traceCounters = tc;
+          cardTraceCode = code;
+        }
         const order = cards.filter((c) => c.subStepId === subStep.id && c.laneKey === laneKey).length;
         cards.push({
           id: uuid(),
@@ -499,7 +508,7 @@ export function normalizeCitesBlueprintMatrix(
           stepId: step.id,
           subStepId: subStep.id,
           laneKey,
-          title: capitalizeSentenceStart(item),
+          title,
           body: '',
           order,
           tags: [],
@@ -507,7 +516,7 @@ export function normalizeCitesBlueprintMatrix(
           sourceSheet,
           sourceRow: rowIdx + 1,
           sourceRef: ref,
-          traceabilityCode: code,
+          traceabilityCode: cardTraceCode,
           createdAt: ts,
           updatedAt: ts,
         });

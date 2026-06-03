@@ -1,5 +1,10 @@
-import type { Card, LaneKey } from './types';
+import type { Card, LaneKey, PainPointRecord } from './types';
 import type { L1BoardLayout } from './board-columns';
+import {
+  extractPainPointIssueKey,
+  normalizePainPointStatus,
+  PAIN_POINT_STATUS_ORDER,
+} from './pain-point-records';
 
 /** Lanes with per-column cards, deduplication, journey filter dropdown, and column filtering. */
 export const JOURNEY_FILTER_LANE_KEYS = ['actor', 'system', 'user_need', 'pain_point'] as const;
@@ -10,12 +15,73 @@ export function isJourneyFilterLane(laneKey: LaneKey): laneKey is JourneyFilterL
   return (JOURNEY_FILTER_LANE_KEYS as readonly string[]).includes(laneKey);
 }
 
-/** One card per title in a column (keeps lowest order / first in list). */
+export interface JourneyLaneFilterOptions {
+  laneKey?: LaneKey;
+  painPointRecords?: Record<string, PainPointRecord>;
+}
+
+function painPointStatusForCard(
+  card: Card,
+  records: Record<string, PainPointRecord>,
+): string | null {
+  const issueKey = extractPainPointIssueKey(card);
+  if (!issueKey) return null;
+  const status = records[issueKey]?.status?.trim();
+  return status || null;
+}
+
+function cardMatchesJourneyFilter(
+  card: Card,
+  target: string,
+  options?: JourneyLaneFilterOptions,
+): boolean {
+  if (options?.laneKey === 'pain_point' && options.painPointRecords) {
+    return painPointStatusForCard(card, options.painPointRecords) === target;
+  }
+  return card.title.trim() === target;
+}
+
+/** Distinct pain point statuses on the board, in workflow order. */
+export function collectPainPointStatuses(
+  cards: Card[],
+  records: Record<string, PainPointRecord>,
+): string[] {
+  const seen = new Set<string>();
+  for (const card of cards) {
+    if (card.laneKey !== 'pain_point') continue;
+    const status = painPointStatusForCard(card, records);
+    if (status) seen.add(status);
+  }
+
+  const workflowIndex = (status: string) => {
+    const normalized = normalizePainPointStatus(status);
+    const index = PAIN_POINT_STATUS_ORDER.indexOf(
+      normalized as (typeof PAIN_POINT_STATUS_ORDER)[number],
+    );
+    return index === -1 ? PAIN_POINT_STATUS_ORDER.length : index;
+  };
+
+  return [...seen].sort((a, b) => {
+    const byWorkflow = workflowIndex(a) - workflowIndex(b);
+    return byWorkflow !== 0 ? byWorkflow : a.localeCompare(b);
+  });
+}
+
+/** Dedupe key for a card in a column (pain points and user needs dedupe by code when present). */
+function dedupeKeyForCard(card: Card): string {
+  if (card.laneKey === 'pain_point' || card.laneKey === 'user_need') {
+    const code = card.traceabilityCode?.trim();
+    if (code) return code.toLowerCase();
+  }
+  return card.title.trim().toLowerCase();
+}
+
+/** One card per dedupe key in a column (keeps lowest order / first in list). */
 export function dedupeLaneCardsInColumn(cards: Card[]): Card[] {
   const seen = new Set<string>();
   const deduped: Card[] = [];
   for (const card of cards) {
-    const key = card.title.trim().toLowerCase();
+    const key = dedupeKeyForCard(card);
     if (!key) {
       deduped.push(card);
       continue;
@@ -27,14 +93,29 @@ export function dedupeLaneCardsInColumn(cards: Card[]): Card[] {
   return deduped;
 }
 
+/** Sub-step column ids a card occupies (step-level cards span all columns in that step). */
+function subStepIdsForCard(card: Card, layout: L1BoardLayout | null): string[] {
+  if (card.subStepId) return [card.subStepId];
+  if (!layout) return [];
+  return layout.leafColumns
+    .filter((col) => col.stepId === card.stepId)
+    .map((col) => col.subStepId);
+}
+
 /** Primary card title per sub-step column (first matching card in that column). */
-function titleBySubStepId(cards: Card[], laneKey: LaneKey): Map<string, string> {
+function titleBySubStepId(
+  cards: Card[],
+  laneKey: LaneKey,
+  layout: L1BoardLayout | null,
+): Map<string, string> {
   const bySubStep = new Map<string, string>();
   for (const card of cards) {
-    if (card.laneKey !== laneKey || !card.subStepId) continue;
+    if (card.laneKey !== laneKey) continue;
     const title = card.title.trim();
-    if (!title || bySubStep.has(card.subStepId)) continue;
-    bySubStep.set(card.subStepId, title);
+    if (!title) continue;
+    for (const subStepId of subStepIdsForCard(card, layout)) {
+      if (!bySubStep.has(subStepId)) bySubStep.set(subStepId, title);
+    }
   }
   return bySubStep;
 }
@@ -45,15 +126,15 @@ export function collectJourneyLaneTypes(
   layout: L1BoardLayout | null,
   laneKey: LaneKey,
 ): string[] {
-  const titleBySubStep = titleBySubStepId(cards, laneKey);
+  const titleBySubStep = titleBySubStepId(cards, laneKey, layout);
   const seen = new Set<string>();
   const ordered: string[] = [];
 
   const subStepOrder =
     layout?.leafColumns.map((col) => col.subStepId) ??
-    cards
-      .filter((card) => card.laneKey === laneKey && card.subStepId)
-      .map((card) => card.subStepId as string);
+    cards.flatMap((card) =>
+      card.laneKey === laneKey ? subStepIdsForCard(card, layout) : [],
+    );
 
   for (const subStepId of subStepOrder) {
     const title = titleBySubStep.get(subStepId);
@@ -66,31 +147,57 @@ export function collectJourneyLaneTypes(
 }
 
 /** Keep only cards matching the selected journey filter. */
-export function filterLaneCardsBySelection(cards: Card[], filter: string | null): Card[] {
+export function filterLaneCardsBySelection(
+  cards: Card[],
+  filter: string | null,
+  options?: JourneyLaneFilterOptions,
+): Card[] {
   if (!filter) return cards;
   const target = filter.trim();
-  return cards.filter((card) => card.title.trim() === target);
+  return cards.filter((card) => cardMatchesJourneyFilter(card, target, options));
 }
 
 /** Dedupe and optionally restrict lane cards for display in a cell. */
-export function displayJourneyLaneCards(cards: Card[], filter: string | null): Card[] {
-  return filterLaneCardsBySelection(dedupeLaneCardsInColumn(cards), filter);
+export function displayJourneyLaneCards(
+  cards: Card[],
+  filter: string | null,
+  options?: JourneyLaneFilterOptions,
+): Card[] {
+  return filterLaneCardsBySelection(dedupeLaneCardsInColumn(cards), filter, options);
 }
 
 /** Distinct card types in the cell hidden by the active journey filter. */
-export function countHiddenJourneyLaneTypes(cards: Card[], filter: string | null): number {
+export function countHiddenJourneyLaneTypes(
+  cards: Card[],
+  filter: string | null,
+  options?: JourneyLaneFilterOptions,
+): number {
   if (!filter) return 0;
   const deduped = dedupeLaneCardsInColumn(cards);
-  return deduped.filter((card) => card.title.trim() !== filter.trim()).length;
+  const target = filter.trim();
+  return deduped.filter((card) => !cardMatchesJourneyFilter(card, target, options)).length;
 }
 
-/** Sub-step column IDs that include a card matching the filter title. */
-export function subStepIdsForLaneFilter(cards: Card[], laneKey: LaneKey, filter: string): Set<string> {
+/** Sub-step column IDs that include a card matching the filter. */
+export function subStepIdsForLaneFilter(
+  cards: Card[],
+  laneKey: LaneKey,
+  filter: string,
+  layout: L1BoardLayout | null = null,
+  options?: JourneyLaneFilterOptions,
+): Set<string> {
   const target = filter.trim();
   const ids = new Set<string>();
+  const laneOptions: JourneyLaneFilterOptions = {
+    laneKey,
+    painPointRecords: options?.painPointRecords,
+  };
   for (const card of cards) {
-    if (card.laneKey !== laneKey || !card.subStepId) continue;
-    if (card.title.trim() === target) ids.add(card.subStepId);
+    if (card.laneKey !== laneKey) continue;
+    if (!cardMatchesJourneyFilter(card, target, laneOptions)) continue;
+    for (const subStepId of subStepIdsForCard(card, layout)) {
+      ids.add(subStepId);
+    }
   }
   return ids;
 }
@@ -113,11 +220,20 @@ export function intersectSubStepIdSets(sets: Set<string>[]): Set<string> {
 export function visibleSubStepIdsForJourneyFilters(
   cards: Card[],
   filters: Partial<Record<JourneyFilterLaneKey, string | null>>,
+  layout: L1BoardLayout | null = null,
+  painPointRecords?: Record<string, PainPointRecord>,
 ): Set<string> | null {
   const sets: Set<string>[] = [];
   for (const laneKey of JOURNEY_FILTER_LANE_KEYS) {
     const filter = filters[laneKey];
-    if (filter) sets.push(subStepIdsForLaneFilter(cards, laneKey, filter));
+    if (filter) {
+      sets.push(
+        subStepIdsForLaneFilter(cards, laneKey, filter, layout, {
+          laneKey,
+          painPointRecords,
+        }),
+      );
+    }
   }
   if (sets.length === 0) return null;
   return intersectSubStepIdSets(sets);

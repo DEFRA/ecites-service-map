@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
-import { splitCellItems, splitEmbeddedTypedLaneItems, parseInlineId, parseLeadingCodeLabel, detectFormat, normalizeSwimlaneMatrix } from '../normalize';
+import { splitCellItems, splitEmbeddedTypedLaneItems, splitEmbeddedCodedLaneItems, splitLaneCellItems, parseInlineId, parseLeadingCodeLabel, detectFormat, normalizeSwimlaneMatrix } from '../normalize';
 import { processXlsxSheet } from '../parse';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,40 @@ describe('splitCellItems', () => {
   });
 });
 
+describe('splitEmbeddedCodedLaneItems', () => {
+  it('splits multiple inline codes on one line', () => {
+    expect(splitEmbeddedCodedLaneItems('CTS-100 First issue CTS-101 Second issue')).toEqual([
+      'CTS-100 First issue',
+      'CTS-101 Second issue',
+    ]);
+  });
+
+  it('splits two-digit inline codes with no description', () => {
+    expect(splitEmbeddedCodedLaneItems('CTS-77 CTS-95')).toEqual(['CTS-77', 'CTS-95']);
+  });
+
+  it('splits single- and four-digit inline codes', () => {
+    expect(splitEmbeddedCodedLaneItems('CTS-1 CTS-1000')).toEqual(['CTS-1', 'CTS-1000']);
+  });
+
+  it('returns a single item when only one code is present', () => {
+    expect(splitEmbeddedCodedLaneItems('CTS-100 Only one issue')).toEqual(['CTS-100 Only one issue']);
+  });
+
+  it('returns plain text unchanged when no inline code is present', () => {
+    expect(splitEmbeddedCodedLaneItems('Guidance is unclear')).toEqual(['Guidance is unclear']);
+  });
+});
+
+describe('splitLaneCellItems', () => {
+  it('splits newlines and inline codes together', () => {
+    expect(splitLaneCellItems('CTS-100 First\nCTS-101 Second')).toEqual([
+      'CTS-100 First',
+      'CTS-101 Second',
+    ]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // parseInlineId
 // ---------------------------------------------------------------------------
@@ -111,8 +145,26 @@ describe('parseInlineId', () => {
     expect(parseInlineId('Just a plain card')).toEqual({ text: 'Just a plain card' });
   });
 
-  it('does not match two-digit sequences', () => {
-    expect(parseInlineId('PP-01 Too short')).toEqual({ text: 'PP-01 Too short' });
+  it('parses code-only items', () => {
+    expect(parseInlineId('CTS-77')).toEqual({
+      traceabilityCode: 'CTS-77',
+      text: 'CTS-77',
+    });
+  });
+
+  it('parses single- and four-digit codes', () => {
+    expect(parseInlineId('CTS-1')).toEqual({ traceabilityCode: 'CTS-1', text: 'CTS-1' });
+    expect(parseInlineId('CTS-1000 Guidance unclear')).toEqual({
+      traceabilityCode: 'CTS-1000',
+      text: 'Guidance unclear',
+    });
+  });
+
+  it('parses two-digit codes with following text', () => {
+    expect(parseInlineId('PP-01 Too short')).toEqual({
+      traceabilityCode: 'PP-01',
+      text: 'Too short',
+    });
   });
 
   it('does not match lowercase prefix', () => {
@@ -253,6 +305,21 @@ describe('normalizeSwimlaneMatrix', () => {
     expect(ppCards.map((c) => c.title)).toContain('Forms unclear');
     expect(ppCards.map((c) => c.title)).toContain('Errors confusing');
     expect(ppCards.map((c) => c.title)).toContain('Timeout errors');
+  });
+
+  it('splits multiple inline-coded pain points in one cell into separate cards', () => {
+    const rows = makeRows({
+      pain_point: {
+        lane: 'pain_point',
+        col1: 'CTS-100 Guidance is unclear CTS-101 Forms are confusing',
+        col2: '',
+      },
+    });
+    const { state } = normalizeSwimlaneMatrix(HEADERS, rows, 'test.xlsx', 'Sheet1');
+    const ppCards = state.cards.filter((c) => c.laneKey === 'pain_point');
+    expect(ppCards).toHaveLength(2);
+    expect(ppCards.map((c) => c.traceabilityCode)).toEqual(['CTS-100', 'CTS-101']);
+    expect(ppCards.map((c) => c.title)).toEqual(['Guidance is unclear', 'Forms are confusing']);
   });
 
   it('assigns PP lane traceability codes to pain_point cards', () => {
