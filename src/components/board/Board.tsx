@@ -23,9 +23,9 @@ import { StageHeader } from './StageHeader';
 import { L1JourneyDescriptionRow } from './L1JourneyDescriptionRow';
 import { StepHeader } from './StepHeader';
 import { SubStepHeader } from './SubStepHeader';
-import { L1LaneRow, L1StageOnlyLaneRow, L1StageOnlyStoryboardRow, L1StepHeaderRow, L1StoryboardRow, L1SubStepHeaderRow } from './L1ColumnGrid';
+import { L1LaneRow, L1StageOnlyLaneRow, L1StageOnlyStoryboardRow, L1StepHeaderRow, L1StoryboardRow, L1SubStepHeaderRow, L1SubSubStepRow } from './L1ColumnGrid';
 import { BlueprintCard } from './BlueprintCard';
-import { StoryboardCell } from './StoryboardCell';
+import { StoryboardCell, StoryboardCompactCell } from './StoryboardCell';
 import { ImageCropModal } from './ImageCropModal';
 import { CardDetailPanel } from './CardDetailPanel';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -71,6 +71,7 @@ const LOV_H = 28;             // line of visibility divider height
 const COLLAPSED_LANE_H = 56;
 /** Minimum height; row grows with stacked / tall storyboard images (ResizeObserver syncs left label). */
 const STORYBOARD_ROW_H = 180;
+const STORYBOARD_COMPACT_ROW_H = 88;
 const HORIZONTAL_PAN_STEP = 120;
 const VERTICAL_PAN_STEP = 96;
 
@@ -194,6 +195,10 @@ export function Board() {
   const toggleLaneCollapsed = useBlueprintStore((s) => s.toggleLaneCollapsed);
   const storyboardImages = useBlueprintStore((s) => s.storyboardImages);
   const storyboardVisible = useBlueprintStore((s) => s.storyboardVisible);
+  const storyboardCollapsed = useBlueprintStore((s) => s.storyboardCollapsed);
+  const descriptionRowVisible = useBlueprintStore((s) => s.descriptionRowVisible ?? true);
+  const descriptionRowCollapsed = useBlueprintStore((s) => s.descriptionRowCollapsed ?? false);
+  const subSubStepRowVisible = useBlueprintStore((s) => s.subSubStepRowVisible ?? true);
   const stepHeadersVisible = useBlueprintStore((s) => s.stepHeadersVisible ?? true);
   const subStepHeadersVisible = useBlueprintStore((s) => s.subStepHeadersVisible ?? true);
   const actorJourneyFilter = useBlueprintStore((s) => s.actorJourneyFilter ?? null);
@@ -210,7 +215,6 @@ export function Board() {
   const descriptionVisibleInUserJourney = useBlueprintStore(
     (s) => s.descriptionVisibleInUserJourney ?? false,
   );
-  const storyboardCollapsed = useBlueprintStore((s) => s.storyboardCollapsed);
   const addStep = useBlueprintStore((s) => s.addStep);
   const addStoryboardImage = useBlueprintStore((s) => s.addStoryboardImage);
   const updateStoryboardImage = useBlueprintStore((s) => s.updateStoryboardImage);
@@ -226,7 +230,6 @@ export function Board() {
 
   // Heights measured from right panel, mirrored to left panel
   const [stageRowH, setStageRowH] = useState(MIN_HIERARCHY_ROW_H);
-  const [descriptionRowH, setDescriptionRowH] = useState(60);
   const [stepHeaderRowH, setStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
   const [subStepHeaderRowH, setSubStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
 
@@ -281,47 +284,10 @@ export function Board() {
     });
   }, []);
 
-  // Measure stage row height (wraps with longest title)
-  useLayoutEffect(() => {
-    const el = rightStageRowRef.current;
-    if (!el) return;
-    const initialHeight = getRenderedHeight(el);
-    if (initialHeight > 0) setStageRowH(initialHeight);
-    const obs = new ResizeObserver(([entry]) => {
-      const h = getRenderedHeight(entry.target);
-      if (h > 0) setStageRowH((prev) => (Math.abs(prev - h) <= 1 ? prev : h));
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [getRenderedHeight]);
-
   // Measure description row height (mirrors to left "Description" label).
   // Depends on whether any stage has a description — when that flips from
   // false→true (e.g. navigating into L2 Macro) the effect re-runs so the
   // ResizeObserver attaches to the newly-rendered row.
-  // Sync storyboard label height: imperatively set left label to match right row.
-  // We avoid putting height in the JSX style prop so React never overrides this on re-renders.
-  useLayoutEffect(() => {
-    const leftEl = leftStoryboardLabelRef.current;
-    if (!leftEl) return;
-    if (storyboardCollapsed) {
-      leftEl.style.height = `${COLLAPSED_LANE_H}px`;
-      return;
-    }
-    const rightEl = rightStoryboardRowRef.current;
-    if (!rightEl) {
-      leftEl.style.height = `${STORYBOARD_ROW_H}px`;
-      return;
-    }
-    const sync = () => {
-      const h = rightEl.offsetHeight;
-      if (h > 0) leftEl.style.height = `${h}px`;
-    };
-    sync();
-    const obs = new ResizeObserver(sync);
-    obs.observe(rightEl);
-    return () => obs.disconnect();
-  }, [storyboardVisible, storyboardCollapsed]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -380,11 +346,8 @@ export function Board() {
         .filter((lane): lane is NonNullable<typeof lane> => Boolean(lane))
         .filter((lane) => lane.visible);
     }
-    return visibleLanes.filter((lane) => {
-      if (lane.key !== 'sub_sub_step') return true;
-      return useThreeLayerLayout && subStepHeadersVisible;
-    });
-  }, [isL2Mode, isL3Mode, lanes, visibleLanes, useThreeLayerLayout, subStepHeadersVisible]);
+    return visibleLanes.filter((lane) => lane.key !== 'sub_sub_step');
+  }, [isL2Mode, isL3Mode, lanes, visibleLanes]);
 
   const lineOfVisibilityIndex = useMemo(() => {
     if (isL2Mode || isL3Mode || isL1MacroMode) return -1;
@@ -419,6 +382,31 @@ export function Board() {
     () => useThreeLayerLayout && subStepHeadersVisible && Boolean(l1Layout),
     [useThreeLayerLayout, subStepHeadersVisible, l1Layout],
   );
+
+  const showSubSubStepRow = useMemo(
+    () => showSubStepHeaders && subSubStepRowVisible,
+    [showSubStepHeaders, subSubStepRowVisible],
+  );
+
+  /** When storyboard is collapsed, hide stages/steps/sub-sub-steps to save vertical space. */
+  const storyboardHierarchyOpen = !storyboardVisible || !storyboardCollapsed;
+  const showPhaseHeaderRow = isL1MacroMode && storyboardHierarchyOpen;
+  const showStageHeaderRow = storyboardHierarchyOpen;
+  const showStepHeadersInPanel = showStepHeaders && storyboardHierarchyOpen;
+  const showSubSubStepRowInPanel = showSubSubStepRow && storyboardHierarchyOpen;
+
+  useLayoutEffect(() => {
+    const el = rightStageRowRef.current;
+    if (!el || !showStageHeaderRow) return;
+    const initialHeight = getRenderedHeight(el);
+    if (initialHeight > 0) setStageRowH(initialHeight);
+    const obs = new ResizeObserver(([entry]) => {
+      const h = getRenderedHeight(entry.target);
+      if (h > 0) setStageRowH((prev) => (Math.abs(prev - h) <= 1 ? prev : h));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [getRenderedHeight, showStageHeaderRow]);
 
   const showJourneyLaneFilters = useThreeLayerLayout;
 
@@ -561,7 +549,7 @@ export function Board() {
 
   useLayoutEffect(() => {
     const el = rightStepHeaderRowRef.current;
-    if (!el || !showStepHeaders) return;
+    if (!el || !showStepHeadersInPanel) return;
     const initialHeight = getRenderedHeight(el);
     if (initialHeight > 0) setStepHeaderRowH(initialHeight);
     const obs = new ResizeObserver(([entry]) => {
@@ -570,7 +558,7 @@ export function Board() {
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, [getRenderedHeight, showStepHeaders]);
+  }, [getRenderedHeight, showStepHeadersInPanel]);
 
   useLayoutEffect(() => {
     const el = rightSubStepHeaderRowRef.current;
@@ -749,7 +737,7 @@ export function Board() {
   const showJourneyDescriptionRow =
     useThreeLayerLayout &&
     !activeJourney &&
-    storyboardVisible;
+    descriptionRowVisible;
   const showUserJourneyDescriptionRow =
     useThreeLayerLayout && Boolean(activeJourney);
   const showHierarchyDescriptionInJourney =
@@ -760,32 +748,34 @@ export function Board() {
     showUserJourneyDescriptionRow || showJourneyDescriptionRow || showHierarchyDescriptionInJourney;
 
   const showJourneyDescriptionRowForLayout = showJourneyDescriptionRow || showHierarchyDescriptionInJourney;
+  const showJourneyContentRowInPanel = showJourneyContentRow && !storyboardCollapsed;
 
+  // Sync storyboard label height: spans storyboard row plus description row on the right.
   useLayoutEffect(() => {
-    const el = rightDescriptionRowRef.current;
-    if (!el || !showJourneyContentRow) return;
-    const initialHeight = getRenderedHeight(el);
-    if (initialHeight > 0) setDescriptionRowH(initialHeight);
-    const obs = new ResizeObserver(([entry]) => {
-      const h = getRenderedHeight(entry.target);
-      if (h > 0) setDescriptionRowH(h);
-    });
-    obs.observe(el);
+    const leftEl = leftStoryboardLabelRef.current;
+    if (!leftEl || !storyboardVisible) return;
+    const rightStoryboard = rightStoryboardRowRef.current;
+    const rightDescription = rightDescriptionRowRef.current;
+    const sync = () => {
+      let h = rightStoryboard?.offsetHeight ?? (storyboardCollapsed ? STORYBOARD_COMPACT_ROW_H : STORYBOARD_ROW_H);
+      if (showJourneyContentRowInPanel && rightDescription) {
+        h += rightDescription.offsetHeight;
+      }
+      if (h > 0) leftEl.style.height = `${h}px`;
+    };
+    sync();
+    const obs = new ResizeObserver(sync);
+    if (rightStoryboard) obs.observe(rightStoryboard);
+    if (showJourneyContentRowInPanel && rightDescription) obs.observe(rightDescription);
     return () => obs.disconnect();
   }, [
-    getRenderedHeight,
-    showJourneyContentRow,
+    storyboardVisible,
+    storyboardCollapsed,
+    showJourneyContentRowInPanel,
+    descriptionRowCollapsed,
     storyboardLevel,
     boardStages,
     subSteps,
-    actorJourneyFilter,
-    systemJourneyFilter,
-    userNeedJourneyFilter,
-    painPointJourneyFilter,
-    activeUserJourneyId,
-    descriptionVisibleInUserJourney,
-    stepHeadersVisible,
-    subStepHeadersVisible,
   ]);
 
   const storyboardImageIndex = useMemo(
@@ -1097,7 +1087,7 @@ export function Board() {
         >
           {/* Sticky header labels — heights mirror right panel header rows */}
           <div className="sticky top-0 z-30 bg-[#fafafa]">
-            {isL1MacroMode && (
+            {isL1MacroMode && showPhaseHeaderRow && (
               <div
                 className="flex items-center border-b border-neutral-200 bg-neutral-50 px-4"
                 style={{ minHeight: 36 }}
@@ -1107,6 +1097,7 @@ export function Board() {
                 </span>
               </div>
             )}
+            {showStageHeaderRow && (
             <div
               className="flex items-center border-b border-neutral-200 px-4"
               style={{ height: stageRowH }}
@@ -1115,8 +1106,9 @@ export function Board() {
                 {(isL2Mode || isL3Mode) ? 'Steps' : 'Stages'}
               </span>
             </div>
+            )}
 
-            {showStepHeaders && (
+            {showStepHeadersInPanel && (
               <div
                 className="flex items-center border-b border-neutral-200 px-4"
                 style={{ height: stepHeaderRowH }}
@@ -1138,55 +1130,49 @@ export function Board() {
               </div>
             )}
 
-            {/* Storyboard label — sticky, height mirrors right panel storyboard row.
-                Uses `group` so the Generate button can appear on hover. */}
-            {storyboardVisible && (
+            {showSubSubStepRowInPanel && (
               <div
-                ref={leftStoryboardLabelRef}
-                className={cn(
-                  'group/storyboard flex border-b border-neutral-200 px-3',
-                  storyboardCollapsed ? 'items-center py-2.5' : 'items-start py-3',
-                )}
-                style={{ minHeight: storyboardCollapsed ? COLLAPSED_LANE_H : STORYBOARD_ROW_H }}
+                className="flex items-center border-b border-neutral-200 px-4"
+                style={{ height: subStepHeaderRowH }}
               >
-                <div
-                  className={cn(
-                    'flex w-full flex-col gap-1.5 overflow-hidden rounded-xl border transition-colors',
-                    storyboardCollapsed ? 'px-3 py-1.5' : 'px-3 py-2',
-                    'bg-neutral-50 text-neutral-600 border-neutral-200',
-                  )}
-                >
-                  {/* Header row: icon, title, collapse toggle */}
-                  <div className="flex items-center gap-2">
-                    <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
-                      {isL3Mode ? 'Screens' : 'Storyboard'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={toggleStoryboardCollapsed}
-                      aria-label={`${
-                        storyboardCollapsed ? 'Expand' : 'Collapse'
-                      } ${isL3Mode ? 'Screens' : 'Storyboard'}`}
-                      aria-expanded={!storyboardCollapsed}
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/80 transition-colors hover:bg-white/60 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                    >
-                      {storyboardCollapsed ? <ChevronDown aria-hidden="true" className="h-4 w-4" /> : <ChevronUp aria-hidden="true" className="h-4 w-4" />}
-                    </button>
-                  </div>
-
-                </div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                  Sub-sub-steps
+                </span>
               </div>
             )}
 
-            {showJourneyContentRow && (
+            {/* Storyboard label — row height mirrors right panel; toggle stays compact at top. */}
+            {storyboardVisible && (
               <div
-                className="flex items-center border-b border-neutral-200 px-4"
-                style={{ minHeight: descriptionRowH }}
+                ref={leftStoryboardLabelRef}
+                className="group/storyboard flex items-start border-b border-neutral-200 px-3 py-3"
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-                  {showUserJourneyDescriptionRow ? 'Journey' : 'Description'}
-                </span>
+                <div
+                  className={cn(
+                    'flex w-full items-center gap-2 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 text-neutral-600 transition-colors',
+                    storyboardCollapsed ? 'px-3 py-1.5' : 'px-3 py-2',
+                  )}
+                >
+                  <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
+                    {isL3Mode ? 'Screens' : 'Storyboard'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={toggleStoryboardCollapsed}
+                    aria-label={`${
+                      storyboardCollapsed ? 'Expand' : 'Collapse'
+                    } ${isL3Mode ? 'Screens' : 'Storyboard'}`}
+                    aria-expanded={!storyboardCollapsed}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/80 transition-colors hover:bg-white/60 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    {storyboardCollapsed ? (
+                      <ChevronUp aria-hidden="true" className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown aria-hidden="true" className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1261,7 +1247,7 @@ export function Board() {
             <div className="sticky top-0 z-40 bg-white">
 
               {/* Phase grouping row (L1 Macro only) */}
-              {phaseGroups.length > 0 && (() => {
+              {showPhaseHeaderRow && phaseGroups.length > 0 && (() => {
                 const distinctPhases = [...new Set(phaseGroups.map(pg => pg.phase).filter(Boolean))];
                 const phaseColorMap = new Map(distinctPhases.map((p, i) => [p, i]));
                 return (
@@ -1291,6 +1277,7 @@ export function Board() {
               })()}
 
               {/* Stage row */}
+              {showStageHeaderRow && (
               <div
                 ref={rightStageRowRef}
                 className="group relative z-20"
@@ -1338,8 +1325,9 @@ export function Board() {
                   </div>
                 )}
               </div>
+              )}
 
-              {showStepHeaders && useThreeLayerLayout && activeL1Layout && (
+              {showStepHeadersInPanel && useThreeLayerLayout && activeL1Layout && (
                 <div ref={rightStepHeaderRowRef} style={{ height: stepHeaderRowH }}>
                   <L1StepHeaderRow
                     layout={activeL1Layout}
@@ -1352,7 +1340,7 @@ export function Board() {
                 </div>
               )}
 
-              {showStepHeaders && !useThreeLayerLayout && (
+              {showStepHeadersInPanel && !useThreeLayerLayout && (
                 <div ref={rightStepHeaderRowRef} className="flex overflow-hidden border-b border-neutral-200 bg-white" style={{ height: stepHeaderRowH }}>
                   {sortedStages.map((stage) => {
                     const stageSteps = stepsPerStage.get(stage.id) || [];
@@ -1410,6 +1398,18 @@ export function Board() {
                 </div>
               )}
 
+              {showSubSubStepRowInPanel && activeL1Layout && (
+                <div style={{ height: subStepHeaderRowH }}>
+                  <L1SubSubStepRow
+                    layout={activeL1Layout}
+                    rowHeight={subStepHeaderRowH}
+                    leafColumnCount={totalStepColumns}
+                    includeAddColumn={includeAddColumn}
+                    getCardsForSubStepCell={getCardsForSubStepCell}
+                  />
+                </div>
+              )}
+
               {/* Storyboard row — image thumbnails per step */}
               {storyboardVisible && (
               <div
@@ -1418,7 +1418,11 @@ export function Board() {
                   'border-b border-neutral-200',
                   storyboardCollapsed && 'bg-neutral-50/80',
                 )}
-                style={storyboardCollapsed ? { height: COLLAPSED_LANE_H } : { minHeight: STORYBOARD_ROW_H }}
+                style={
+                  storyboardCollapsed
+                    ? { minHeight: STORYBOARD_COMPACT_ROW_H }
+                    : { minHeight: STORYBOARD_ROW_H }
+                }
               >
                 {useStageOnlyColumns ? (
                   <L1StageOnlyStoryboardRow
@@ -1436,6 +1440,9 @@ export function Board() {
                     layout={activeL1Layout}
                     collapsed={storyboardCollapsed}
                     level={storyboardLevel}
+                    stages={boardStages}
+                    steps={steps}
+                    subSteps={subSteps}
                     storyboardImagesByStep={storyboardImageIndex.byStep}
                     storyboardImagesBySubStep={storyboardImageIndex.bySubStep}
                     onUploadStageId={setStoryboardUploadStageId}
@@ -1451,32 +1458,24 @@ export function Board() {
                   ? sortedStages.map((stage) => {
                       const stageSteps = stepsPerStage.get(stage.id) || [];
                       const colCount = stageColCount(stageSteps.length);
+                      const stepById = new Map(steps.map((s) => [s.id, s]));
 
                       const cells =
                         stageSteps.length === 0 ? (
-                          <div style={{ width: STEP_WIDTH, height: COLLAPSED_LANE_H }} />
+                          <div style={{ width: STEP_WIDTH, minHeight: STORYBOARD_COMPACT_ROW_H }} />
                         ) : (
-                          stageSteps.map((step, stepIdx) => {
-                            const n = storyboardImageIndex.byStep.get(step.id)?.length ?? 0;
-                            return (
-                              <div
-                                key={step.id}
-                                className={cn(
-                                  'flex shrink-0 items-center px-4',
-                                  stepDividerClass(stepIdx, stageSteps.length),
-                                )}
-                                style={{ width: STEP_WIDTH, height: COLLAPSED_LANE_H }}
-                              >
-                                {n > 0 ? (
-                                  <span className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
-                                    {n} image{n !== 1 ? 's' : ''}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] text-neutral-300">&nbsp;</span>
-                                )}
-                              </div>
-                            );
-                          })
+                          stageSteps.map((step, stepIdx) => (
+                            <div
+                              key={step.id}
+                              className={cn('shrink-0', stepDividerClass(stepIdx, stageSteps.length))}
+                              style={{ width: STEP_WIDTH, minHeight: STORYBOARD_COMPACT_ROW_H }}
+                            >
+                              <StoryboardCompactCell
+                                images={storyboardImageIndex.byStep.get(step.id) ?? []}
+                                description={stepById.get(step.id)?.description}
+                              />
+                            </div>
+                          ))
                         );
 
                       if (showStageBounds) {
@@ -1485,7 +1484,7 @@ export function Board() {
                             key={stage.id}
                             colCount={colCount}
                             className="bg-white"
-                            style={{ height: COLLAPSED_LANE_H }}
+                            style={{ minHeight: STORYBOARD_COMPACT_ROW_H }}
                           >
                             {cells}
                           </StageBounds>
@@ -1555,33 +1554,40 @@ export function Board() {
                           {cells}
                         </div>
                       );
-                    })
-                }
+                    })}
               </div>
             )}
 
-              {showJourneyContentRow && activeL1Layout && (
-                <div ref={rightDescriptionRowRef} className="flex flex-col">
-                  {showUserJourneyDescriptionRow && activeJourney && (
-                    <L1UserJourneyRow
-                      journey={activeJourney}
-                      layout={activeL1Layout}
-                      leafColumnCount={totalStepColumns}
-                      includeAddColumn={includeAddColumn}
-                    />
-                  )}
-                  {showJourneyDescriptionRowForLayout && (
-                    <L1JourneyDescriptionRow
-                      level={storyboardLevel}
-                      layout={activeL1Layout}
-                      stages={boardStages}
-                      steps={steps}
-                      subSteps={subSteps}
-                      oneColumnPerStep={useStepOnlyColumns}
-                      stageOnly={useStageOnlyColumns}
-                      leafColumnCount={totalStepColumns}
-                      includeAddColumn={includeAddColumn && !showUserJourneyDescriptionRow}
-                    />
+              {showJourneyContentRowInPanel && activeL1Layout && (
+                <div
+                  ref={rightDescriptionRowRef}
+                  className={cn('flex flex-col', descriptionRowCollapsed && 'bg-neutral-50/80')}
+                  style={descriptionRowCollapsed ? { height: COLLAPSED_LANE_H } : undefined}
+                >
+                  {!descriptionRowCollapsed && (
+                    <>
+                      {showUserJourneyDescriptionRow && activeJourney && (
+                        <L1UserJourneyRow
+                          journey={activeJourney}
+                          layout={activeL1Layout}
+                          leafColumnCount={totalStepColumns}
+                          includeAddColumn={includeAddColumn}
+                        />
+                      )}
+                      {showJourneyDescriptionRowForLayout && (
+                        <L1JourneyDescriptionRow
+                          level={storyboardLevel}
+                          layout={activeL1Layout}
+                          stages={boardStages}
+                          steps={steps}
+                          subSteps={subSteps}
+                          oneColumnPerStep={useStepOnlyColumns}
+                          stageOnly={useStageOnlyColumns}
+                          leafColumnCount={totalStepColumns}
+                          includeAddColumn={includeAddColumn && !showUserJourneyDescriptionRow}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               )}

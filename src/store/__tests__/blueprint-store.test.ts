@@ -88,7 +88,7 @@ describe('blueprint journey state', () => {
       cards: [],
       storyboardImages: [],
       storyboardVisible: true,
-      storyboardCollapsed: false,
+    storyboardCollapsed: false,
       cardLinks: [],
       evidence: [],
       opportunities: [],

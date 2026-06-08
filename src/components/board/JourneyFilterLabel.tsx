@@ -4,6 +4,7 @@ import { User, Database, Heart, AlertTriangle, ChevronDown, Check } from 'lucide
 import { type LaneDefinition, type LaneKey } from '@/lib/types';
 import { getLaneTitle } from '@/lib/lane-definitions';
 import { type JourneyFilterLaneKey, isJourneyFilterLane } from '@/lib/journey-lane-filter';
+import { painPointStatusPillClass } from '@/lib/pain-point-records';
 import { LANE_COLOR_TOKENS } from '@/components/board/LaneLabel';
 import {
   DropdownMenu,
@@ -34,6 +35,16 @@ const FOCUS_RING: Record<JourneyFilterLaneKey, string> = {
   pain_point: 'focus-visible:ring-rose-400',
 };
 
+const FILTER_PILL_NEUTRAL =
+  'border-neutral-200/80 bg-white/70 text-neutral-700';
+
+function filterSelectionPillClass(laneKey: JourneyFilterLaneKey, value: string): string {
+  if (laneKey === 'pain_point') {
+    return painPointStatusPillClass(value);
+  }
+  return FILTER_PILL_NEUTRAL;
+}
+
 interface JourneyFilterLabelProps {
   lane: LaneDefinition;
   collapsed?: boolean;
@@ -56,49 +67,64 @@ export function JourneyFilterLabel({
   const token = LANE_COLOR_TOKENS[lane.key] ?? LANE_COLOR_TOKENS.actor;
   const Icon = ICON_MAP[laneKey] ?? User;
   const menuLabel = selectedFilter ?? ALL_LABEL[laneKey];
+  const showFilterPill = Boolean(selectedFilter) && !collapsed;
 
   return (
     <div
       className={cn(
-        'flex w-full items-center gap-2 overflow-hidden rounded-xl border transition-colors',
-        collapsed ? 'px-3 py-1.5' : 'px-3 py-2',
+        'flex w-full overflow-hidden rounded-xl border transition-colors',
+        showFilterPill ? 'flex-col gap-1.5 px-2 py-2' : 'items-center gap-2 px-3 py-2',
+        collapsed && 'py-1.5',
         token.bg,
         token.text,
         token.border,
         className,
       )}
     >
-      <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
-      <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
-        {laneTitle}
-      </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className={cn(
-            'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/90 transition-colors hover:bg-white/60 focus:outline-none focus-visible:ring-2',
-            FOCUS_RING[laneKey],
-          )}
-          aria-label={`Filter journey by ${laneTitle.toLowerCase()}. Current selection: ${menuLabel}`}
-        >
-          <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 opacity-80" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[12rem]">
-          <DropdownMenuItem onClick={() => onSelectFilter(null)}>
-            <span className="flex flex-1 items-center justify-between gap-2">
-              {ALL_LABEL[laneKey]}
-              {selectedFilter === null && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
-            </span>
-          </DropdownMenuItem>
-          {filterTypes.map((item) => (
-            <DropdownMenuItem key={item} onClick={() => onSelectFilter(item)}>
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
+        <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
+          {laneTitle}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/90 transition-colors hover:bg-white/60 focus:outline-none focus-visible:ring-2',
+              FOCUS_RING[laneKey],
+            )}
+            aria-label={`Filter journey by ${laneTitle.toLowerCase()}. Current selection: ${menuLabel}`}
+          >
+            <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 opacity-80" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[12rem]">
+            <DropdownMenuItem onClick={() => onSelectFilter(null)}>
               <span className="flex flex-1 items-center justify-between gap-2">
-                <span className="truncate">{item}</span>
-                {selectedFilter === item && <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                {ALL_LABEL[laneKey]}
+                {selectedFilter === null && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
               </span>
             </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {filterTypes.map((item) => (
+              <DropdownMenuItem key={item} onClick={() => onSelectFilter(item)}>
+                <span className="flex flex-1 items-center justify-between gap-2">
+                  <span className="truncate">{item}</span>
+                  {selectedFilter === item && <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {showFilterPill && selectedFilter && (
+        <div
+          title={selectedFilter}
+          className={cn(
+            'w-full rounded-md border px-2 py-1 text-[10px] font-semibold leading-snug',
+            filterSelectionPillClass(laneKey, selectedFilter),
+          )}
+        >
+          {selectedFilter}
+        </div>
+      )}
     </div>
   );
 }

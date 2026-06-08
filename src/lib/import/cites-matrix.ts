@@ -105,6 +105,10 @@ function emptyImportState(bpId: string, ts: string, serviceName: string): Bluepr
     storyboardImages: [],
     storyboardVisible: true,
     storyboardCollapsed: false,
+    descriptionRowVisible: true,
+    descriptionRowCollapsed: false,
+    subSubStepRowVisible: true,
+    subSubStepRowCollapsed: false,
     stepHeadersVisible: true,
     subStepHeadersVisible: true,
     actorJourneyFilter: null,
@@ -555,7 +559,7 @@ export function normalizeCitesBlueprintMatrix(
 
 /**
  * Replaces stages, steps, sub-steps and lane cards from the CITES CSV while keeping
- * the current blueprint identity and any storyboard images the team added.
+ * the current blueprint identity, storyboard images, and Jira pain point details.
  */
 export function applyCitesBlueprintImport(
   current: BlueprintState,
@@ -604,6 +608,7 @@ export function applyCitesBlueprintImport(
     rootDocument: current.rootDocument ?? null,
     childBlueprints: current.childBlueprints ?? [],
     storyboardImages,
+    painPointRecords: { ...(current.painPointRecords ?? {}) },
     traceabilityCounters: {
       ...(current.traceabilityCounters ?? {}),
       ...(imported.traceabilityCounters ?? {}),

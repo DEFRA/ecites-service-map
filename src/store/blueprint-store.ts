@@ -432,6 +432,10 @@ function normalizeChildTreeNode(child: BlueprintState, parent: BlueprintState): 
     storyboardImages: child.storyboardImages ?? [],
     storyboardVisible: child.storyboardVisible ?? true,
     storyboardCollapsed: child.storyboardCollapsed ?? false,
+    descriptionRowVisible: child.descriptionRowVisible ?? true,
+    descriptionRowCollapsed: child.descriptionRowCollapsed ?? false,
+    subSubStepRowVisible: child.subSubStepRowVisible ?? child.lanes?.find((l) => l.key === 'sub_sub_step')?.visible ?? true,
+    subSubStepRowCollapsed: child.subSubStepRowCollapsed ?? false,
     cardLinks: child.cardLinks ?? [],
     evidence: child.evidence ?? [],
     opportunities: child.opportunities ?? [],
@@ -515,6 +519,13 @@ function normalizeState(state: BlueprintState): BlueprintState {
     storyboardImages: state.storyboardImages ?? [],
     storyboardVisible: state.storyboardVisible ?? true,
     storyboardCollapsed: state.storyboardCollapsed ?? false,
+    descriptionRowVisible: state.descriptionRowVisible ?? true,
+    descriptionRowCollapsed: state.descriptionRowCollapsed ?? false,
+    subSubStepRowVisible:
+      state.subSubStepRowVisible ??
+      state.lanes?.find((lane) => lane.key === 'sub_sub_step')?.visible ??
+      true,
+    subSubStepRowCollapsed: state.subSubStepRowCollapsed ?? false,
     stepHeadersVisible: state.stepHeadersVisible ?? true,
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
@@ -709,6 +720,10 @@ interface BlueprintStore extends BlueprintState {
   /** Merge Jira pain point metadata keyed by issue key (e.g. CTS-95). */
   importPainPointRecords: (records: Record<string, PainPointRecord>) => number;
   toggleStoryboardVisible: () => void;
+  toggleDescriptionRowVisible: () => void;
+  toggleDescriptionRowCollapsed: () => void;
+  toggleSubSubStepRowVisible: () => void;
+  toggleSubSubStepRowCollapsed: () => void;
   toggleStoryboardCollapsed: () => void;
   toggleStepHeadersVisible: () => void;
   toggleSubStepHeadersVisible: () => void;
@@ -806,6 +821,10 @@ function emptyBlueprint(): BlueprintState {
     storyboardImages: [],
     storyboardVisible: true,
     storyboardCollapsed: false,
+    descriptionRowVisible: true,
+    descriptionRowCollapsed: false,
+    subSubStepRowVisible: true,
+    subSubStepRowCollapsed: false,
     stepHeadersVisible: true,
     subStepHeadersVisible: true,
     actorJourneyFilter: null,
@@ -852,7 +871,11 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     cards: state.cards,
     storyboardImages: state.storyboardImages,
     storyboardVisible: state.storyboardVisible,
-    storyboardCollapsed: state.storyboardCollapsed,
+    storyboardCollapsed: state.storyboardCollapsed ?? false,
+    descriptionRowVisible: state.descriptionRowVisible ?? true,
+    descriptionRowCollapsed: state.descriptionRowCollapsed ?? false,
+    subSubStepRowVisible: state.subSubStepRowVisible ?? true,
+    subSubStepRowCollapsed: state.subSubStepRowCollapsed ?? false,
     stepHeadersVisible: state.stepHeadersVisible ?? true,
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
@@ -950,6 +973,10 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     storyboardImages: (state.storyboardImages ?? []).map((img) => ({ ...img })),
     storyboardVisible: state.storyboardVisible ?? true,
     storyboardCollapsed: state.storyboardCollapsed ?? false,
+    descriptionRowVisible: state.descriptionRowVisible ?? true,
+    descriptionRowCollapsed: state.descriptionRowCollapsed ?? false,
+    subSubStepRowVisible: state.subSubStepRowVisible ?? true,
+    subSubStepRowCollapsed: state.subSubStepRowCollapsed ?? false,
     stepHeadersVisible: state.stepHeadersVisible ?? true,
     subStepHeadersVisible: state.subStepHeadersVisible ?? true,
     actorJourneyFilter: state.actorJourneyFilter ?? null,
@@ -1079,7 +1106,11 @@ function persist(state: BlueprintState) {
     cards: forDisk.cards,
     storyboardImages: forDisk.storyboardImages,
     storyboardVisible: forDisk.storyboardVisible,
-    storyboardCollapsed: forDisk.storyboardCollapsed,
+    storyboardCollapsed: forDisk.storyboardCollapsed ?? false,
+    descriptionRowVisible: forDisk.descriptionRowVisible ?? true,
+    descriptionRowCollapsed: forDisk.descriptionRowCollapsed ?? false,
+    subSubStepRowVisible: forDisk.subSubStepRowVisible ?? true,
+    subSubStepRowCollapsed: forDisk.subSubStepRowCollapsed ?? false,
     stepHeadersVisible: forDisk.stepHeadersVisible ?? true,
     subStepHeadersVisible: forDisk.subStepHeadersVisible ?? true,
     actorJourneyFilter: forDisk.actorJourneyFilter ?? null,
@@ -1389,7 +1420,7 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
         cards: imported.cards,
         storyboardImages: imported.storyboardImages,
         storyboardVisible: imported.storyboardVisible,
-        storyboardCollapsed: imported.storyboardCollapsed,
+        storyboardCollapsed: imported.storyboardCollapsed ?? false,
         stepHeadersVisible: imported.stepHeadersVisible ?? true,
         subStepHeadersVisible: imported.subStepHeadersVisible ?? true,
         cardLinks: imported.cardLinks,
@@ -2541,6 +2572,90 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const nextDocument = cloneDocumentState({
         ...current,
         storyboardVisible: !current.storyboardVisible,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleDescriptionRowVisible: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        descriptionRowVisible: !(current.descriptionRowVisible ?? true),
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleDescriptionRowCollapsed: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        descriptionRowCollapsed: !(current.descriptionRowCollapsed ?? false),
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleSubSubStepRowVisible: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSubStepRowVisible: !(current.subSubStepRowVisible ?? true),
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  toggleSubSubStepRowCollapsed: () => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        subSubStepRowCollapsed: !(current.subSubStepRowCollapsed ?? false),
       });
       if (isSameDocument(current, nextDocument)) return s;
       const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);

@@ -449,6 +449,14 @@ export interface BlueprintState {
   storyboardImages: StoryboardImage[];
   storyboardVisible: boolean;
   storyboardCollapsed: boolean;
+  /** Show the stage/step/sub-step description row (lifecycle three-layer boards). */
+  descriptionRowVisible?: boolean;
+  /** Collapse the description row content while keeping the label visible. */
+  descriptionRowCollapsed?: boolean;
+  /** Show the sub-sub-steps row beneath sub-steps (lifecycle three-layer boards). */
+  subSubStepRowVisible?: boolean;
+  /** Collapse the sub-sub-steps row content while keeping the label visible. */
+  subSubStepRowCollapsed?: boolean;
   /** Show the steps header row beneath stages. */
   stepHeadersVisible: boolean;
   /** Show the sub-steps header row (lifecycle three-layer boards). */

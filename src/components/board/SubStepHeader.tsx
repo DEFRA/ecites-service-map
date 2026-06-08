@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { type SubStep } from '@/lib/types';
 import { useBlueprintStore } from '@/store/blueprint-store';
@@ -18,7 +18,6 @@ const actionBtnClass =
 
 export function SubStepHeader({ subStep, stepWidth, canMoveLeft, canMoveRight }: SubStepHeaderProps) {
   const updateSubStep = useBlueprintStore((s) => s.updateSubStep);
-  const addSubStep = useBlueprintStore((s) => s.addSubStep);
   const deleteSubStep = useBlueprintStore((s) => s.deleteSubStep);
   const reorderSubStep = useBlueprintStore((s) => s.reorderSubStep);
   const readOnly = useBlueprintStore((s) => s.readOnly);
@@ -105,14 +104,6 @@ export function SubStepHeader({ subStep, stepWidth, canMoveLeft, canMoveRight }:
               )}
               <button type="button" onClick={() => setEditing(true)} className={actionBtnClass} aria-label="Edit sub-step title">
                 <Pencil aria-hidden="true" className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => addSubStep(subStep.stepId, 'New sub-step')}
-                className={actionBtnClass}
-                aria-label="Add sub-step to this step"
-              >
-                <Plus aria-hidden="true" className="h-3 w-3" />
               </button>
               <button
                 type="button"

@@ -93,9 +93,9 @@ describe('journey lane filter — user need and pain point', () => {
     };
 
     expect(collectPainPointStatuses(cards, records)).toEqual([
-      'Needs much X-gov help to fix',
-      'APHA can fix or mitigate',
       'eCITES can fix',
+      'APHA can fix or mitigate',
+      'Needs much X-gov help to fix',
     ]);
   });
 
@@ -131,6 +131,41 @@ describe('journey lane filter — user need and pain point', () => {
         painPointRecords: records,
       })[0]?.title,
     ).toBe('CTS-37');
+  });
+
+  it('stacks pain point cards easiest fix first', () => {
+    const cards: Card[] = [
+      makeCard({ id: 'pp1', laneKey: 'pain_point', title: 'CTS-95', subStepId: 'sub1', order: 0 }),
+      makeCard({ id: 'pp2', laneKey: 'pain_point', title: 'CTS-37', subStepId: 'sub1', order: 1 }),
+      makeCard({ id: 'pp3', laneKey: 'pain_point', title: 'CTS-78', subStepId: 'sub1', order: 2 }),
+    ];
+    const records = {
+      'CTS-95': {
+        issueKey: 'CTS-95',
+        summary: 'Hard',
+        status: 'Needs much X-gov help to fix',
+        description: '',
+      },
+      'CTS-37': {
+        issueKey: 'CTS-37',
+        summary: 'Easy',
+        status: 'eCITES can fix',
+        description: '',
+      },
+      'CTS-78': {
+        issueKey: 'CTS-78',
+        summary: 'Cannot',
+        status: 'Cannot be fixed',
+        description: '',
+      },
+    };
+
+    expect(
+      displayJourneyLaneCards(cards, null, {
+        laneKey: 'pain_point',
+        painPointRecords: records,
+      }).map((card) => card.title),
+    ).toEqual(['CTS-37', 'CTS-95', 'CTS-78']);
   });
 
   it('maps pain point status filters to sub-step columns', () => {

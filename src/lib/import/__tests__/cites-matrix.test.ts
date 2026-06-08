@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  applyCitesBlueprintImport,
   detectCitesBlueprintMatrix,
   fillMergedRow,
   needsCitesCsvRefresh,
@@ -131,6 +132,37 @@ describe('CITES service blueprint matrix', () => {
     const firstSubStepId = falcon!.subStepIds[0]!;
     const firstColumn = falcon!.columns[firstSubStepId];
     expect(firstColumn?.storyTitle).toBeTruthy();
+  });
+
+  it('keeps Jira pain point details when re-importing the service map spreadsheet', () => {
+    const current = {
+      blueprint: {
+        id: 'bp-1',
+        serviceName: 'eCITES blueprint',
+        description: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      stages: [],
+      steps: [],
+      subSteps: [],
+      lanes: [],
+      childBlueprints: [],
+      cards: [],
+      storyboardImages: [],
+      painPointRecords: {
+        'CTS-95': {
+          issueKey: 'CTS-95',
+          summary: 'Permit guidance is unclear',
+          status: 'Needs much X-gov help to fix',
+          description: '',
+        },
+      },
+    } as import('@/lib/types').BlueprintState;
+
+    const merged = applyCitesBlueprintImport(current, text, 'cites.csv');
+    expect(merged.painPointRecords?.['CTS-95']?.summary).toBe('Permit guidance is unclear');
+    expect(merged.cards.length).toBeGreaterThan(0);
   });
 
   it('repairs a stale eCITES stub on refresh', () => {

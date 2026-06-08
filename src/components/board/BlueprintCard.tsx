@@ -13,6 +13,7 @@ import { stripRollupsForCardDisplay, stripTraceabilityForDisplay } from '@/lib/t
 import {
   extractPainPointIssueKey,
   formatPainPointHeading,
+  painPointStatusPillClass,
 } from '@/lib/pain-point-records';
 
 interface BlueprintCardProps {
@@ -160,7 +161,7 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
       }}
       className={cn(
         'group relative rounded-lg border px-2 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]',
-        laneToken.bg,
+        card.laneKey === 'pain_point' ? 'bg-white' : laneToken.bg,
         laneToken.border,
         isSelected && 'ring-2 ring-blue-400 ring-offset-1',
         isDragOverlay && 'rotate-1 shadow-lg',
@@ -169,6 +170,16 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
       <div className="flex items-center gap-1">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium leading-tight text-neutral-800">{displayTitle}</p>
+          {card.laneKey === 'pain_point' && painRecord?.status && (
+            <div
+              className={cn(
+                'mt-1 w-full rounded-md border px-2 py-0.5 text-[10px] font-semibold leading-snug',
+                painPointStatusPillClass(painRecord.status),
+              )}
+            >
+              {painRecord.status}
+            </div>
+          )}
           {displayBody && (
             <p className="mt-0.5 text-[11px] leading-snug text-neutral-500">{displayBody}</p>
           )}

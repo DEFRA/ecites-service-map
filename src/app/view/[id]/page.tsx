@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { BoardToolbar } from '@/components/board/BoardToolbar';
 import { Board } from '@/components/board/Board';
+import { PainPointsPage } from '@/components/board/PainPointsPage';
 import type { BlueprintState } from '@/lib/types';
 
 type FetchState =
@@ -21,6 +22,7 @@ export default function ViewSharePage() {
   const stages = useBlueprintStore((s) => s.stages);
 
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'loading' });
+  const [appView, setAppView] = useState<'board' | 'pain_points'>('board');
 
   useEffect(() => {
     if (!id) return;
@@ -98,11 +100,13 @@ export default function ViewSharePage() {
   // loadSharedSnapshot) will be honoured to disable editing.
   return (
     <div className="flex h-screen flex-col bg-[#fafafa]">
-      <BoardToolbar />
+      <BoardToolbar appView={appView} onAppViewChange={setAppView} />
       {stages.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-neutral-500">
           This shared blueprint is empty.
         </div>
+      ) : appView === 'pain_points' ? (
+        <PainPointsPage />
       ) : (
         <Board />
       )}

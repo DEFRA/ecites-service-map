@@ -4,6 +4,7 @@ import {
   extractPainPointIssueKey,
   normalizePainPointStatus,
   PAIN_POINT_STATUS_ORDER,
+  sortPainPointCardsByStatus,
 } from './pain-point-records';
 
 /** Lanes with per-column cards, deduplication, journey filter dropdown, and column filtering. */
@@ -62,7 +63,7 @@ export function collectPainPointStatuses(
   };
 
   return [...seen].sort((a, b) => {
-    const byWorkflow = workflowIndex(a) - workflowIndex(b);
+    const byWorkflow = workflowIndex(b) - workflowIndex(a);
     return byWorkflow !== 0 ? byWorkflow : a.localeCompare(b);
   });
 }
@@ -163,7 +164,11 @@ export function displayJourneyLaneCards(
   filter: string | null,
   options?: JourneyLaneFilterOptions,
 ): Card[] {
-  return filterLaneCardsBySelection(dedupeLaneCardsInColumn(cards), filter, options);
+  const filtered = filterLaneCardsBySelection(dedupeLaneCardsInColumn(cards), filter, options);
+  if (options?.laneKey === 'pain_point' && options.painPointRecords) {
+    return sortPainPointCardsByStatus(filtered, options.painPointRecords);
+  }
+  return filtered;
 }
 
 /** Distinct card types in the cell hidden by the active journey filter. */

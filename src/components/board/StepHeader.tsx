@@ -11,17 +11,14 @@ interface StepHeaderProps {
   stepWidth: number;
   canMoveLeft: boolean;
   canMoveRight: boolean;
-  /** When true, show controls to add sub-steps beneath this step. */
-  showSubStepControls?: boolean;
 }
 
 const actionBtnClass =
   'rounded p-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400';
 
-export function StepHeader({ step, stepWidth, canMoveLeft, canMoveRight, showSubStepControls = false }: StepHeaderProps) {
+export function StepHeader({ step, stepWidth, canMoveLeft, canMoveRight }: StepHeaderProps) {
   const updateStep = useBlueprintStore((s) => s.updateStep);
   const addStep = useBlueprintStore((s) => s.addStep);
-  const addSubStep = useBlueprintStore((s) => s.addSubStep);
   const deleteStep = useBlueprintStore((s) => s.deleteStep);
   const reorderStep = useBlueprintStore((s) => s.reorderStep);
   const readOnly = useBlueprintStore((s) => s.readOnly);
@@ -117,17 +114,6 @@ export function StepHeader({ step, stepWidth, canMoveLeft, canMoveRight, showSub
               >
                 <Plus aria-hidden="true" className="h-3 w-3" />
               </button>
-              {showSubStepControls && (
-                <button
-                  type="button"
-                  onClick={() => addSubStep(step.id, 'New sub-step')}
-                  className={actionBtnClass}
-                  aria-label="Add sub-step to this step"
-                  title="Add sub-step"
-                >
-                  <Plus aria-hidden="true" className="h-3 w-3 text-blue-500" />
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => {

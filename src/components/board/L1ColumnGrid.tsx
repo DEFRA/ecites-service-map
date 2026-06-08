@@ -10,13 +10,14 @@ import { cn } from '@/lib/utils';
 import { CellArea } from './CellArea';
 import { StepHeader } from './StepHeader';
 import { SubStepHeader } from './SubStepHeader';
-import { StoryboardCell } from './StoryboardCell';
+import { StoryboardCell, StoryboardCompactCell } from './StoryboardCell';
 import { StageBounds, stepDividerClass as innerStepBorderR, leafColumnBorderR } from './StageBounds';
 import { BoardAddColumnSpacer } from './BoardAddColumnSpacer';
 
 const STEP_WIDTH = BOARD_STEP_WIDTH;
 const COLLAPSED_LANE_H = 56;
 const STORYBOARD_ROW_H = 180;
+const STORYBOARD_COMPACT_ROW_H = 88;
 
 function innerSubStepBorderR(
   subStepIdx: number,
@@ -78,7 +79,6 @@ export function L1StepHeaderRow({
                     stepWidth={stepWidth}
                     canMoveLeft={stepIdx > 0}
                     canMoveRight={stepIdx < stageGroup.steps.length - 1}
-                    showSubStepControls
                   />
                 </div>
               );
@@ -144,6 +144,82 @@ export function L1SubStepHeaderRow({
                   />
                 </div>
               ));
+            })
+          )}
+        </StageBounds>
+      ))}
+      {includeAddColumn && <BoardAddColumnSpacer />}
+    </div>
+  );
+}
+
+interface L1SubSubStepRowProps {
+  layout: L1BoardLayout;
+  rowHeight?: number;
+  leafColumnCount: number;
+  includeAddColumn?: boolean;
+  getCardsForSubStepCell: (subStepId: string, laneKey: LaneKey) => Card[];
+}
+
+export function L1SubSubStepRow({
+  layout,
+  rowHeight,
+  leafColumnCount,
+  includeAddColumn = true,
+  getCardsForSubStepCell,
+}: L1SubSubStepRowProps) {
+  const headerHeight = rowHeight ?? 44;
+
+  return (
+    <div
+      className="h-full border-b border-neutral-200 bg-white"
+      style={boardColumnGridStyle(leafColumnCount, includeAddColumn)}
+    >
+      {layout.stages.map((stageGroup) => (
+        <StageBounds key={stageGroup.stageId} colCount={stageGroup.span} gridSpan className="h-full bg-white">
+          {stageGroup.steps.length === 0 ? (
+            <div className="h-full w-full bg-white" />
+          ) : (
+            stageGroup.steps.map((stepGroup, stepIdx) => {
+              if (stepGroup.subSteps.length === 0) {
+                return (
+                  <div
+                    key={stepGroup.stepId}
+                    className={cn('h-full shrink-0 bg-white', innerStepBorderR(stepIdx, stageGroup.steps.length))}
+                    style={{ width: STEP_WIDTH * stepGroup.span, height: headerHeight }}
+                  />
+                );
+              }
+
+              return stepGroup.subSteps.map((subStep, subStepIdx) => {
+                const cards = getCardsForSubStepCell(subStep.id, 'sub_sub_step');
+                const label = cards
+                  .map((card) => card.title.trim())
+                  .filter(Boolean)
+                  .join(' · ');
+
+                return (
+                  <div
+                    key={subStep.id}
+                    className={cn(
+                      'flex h-full shrink-0 items-stretch overflow-hidden bg-white',
+                      innerSubStepBorderR(subStepIdx, stepGroup.subSteps.length, stepIdx, stageGroup.steps.length),
+                    )}
+                    style={{ width: STEP_WIDTH, height: headerHeight }}
+                  >
+                    <div
+                      className="flex h-full min-h-0 min-w-0 max-w-full w-full items-start overflow-hidden bg-white px-1.5 py-1"
+                      style={{ width: STEP_WIDTH }}
+                    >
+                      {label ? (
+                        <p className="min-w-0 flex-1 break-words text-left text-[11px] font-medium italic leading-snug text-neutral-700">
+                          {label}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              });
             })
           )}
         </StageBounds>
@@ -367,8 +443,11 @@ export function L1LaneRow({
 
 interface L1StoryboardRowProps {
   layout: L1BoardLayout;
-  collapsed: boolean;
   level: StoryboardLevel;
+  collapsed?: boolean;
+  stages: Stage[];
+  steps: Step[];
+  subSteps: SubStep[];
   storyboardImagesByStep: Map<string, StoryboardImage[]>;
   storyboardImagesBySubStep: Map<string, StoryboardImage[]>;
   onUploadStageId: (stageId: string) => void;
@@ -384,8 +463,11 @@ interface L1StoryboardRowProps {
 
 export function L1StoryboardRow({
   layout,
-  collapsed,
   level,
+  collapsed = false,
+  stages,
+  steps,
+  subSteps,
   storyboardImagesByStep,
   storyboardImagesBySubStep,
   onUploadStageId,
@@ -397,6 +479,9 @@ export function L1StoryboardRow({
   leafColumnCount,
   includeAddColumn = true,
 }: L1StoryboardRowProps) {
+  const stepById = new Map(steps.map((s) => [s.id, s]));
+  const subStepById = new Map(subSteps.map((s) => [s.id, s]));
+
   if (collapsed) {
     return (
       <L1LaneRowGrid leafColumnCount={leafColumnCount} includeAddColumn={includeAddColumn}>
@@ -405,63 +490,64 @@ export function L1StoryboardRow({
             key={stageGroup.stageId}
             colCount={level === 'subStep' ? stageGroup.span : getStageStepColumnCount(stageGroup)}
             gridSpan
-            style={{ height: COLLAPSED_LANE_H }}
+            className="bg-white"
+            style={{ minHeight: STORYBOARD_COMPACT_ROW_H }}
           >
             {stageGroup.steps.length === 0 ? (
-              <div className="w-full" />
+              <div className="w-full" style={{ minHeight: STORYBOARD_COMPACT_ROW_H }} />
             ) : level === 'subStep' ? (
               stageGroup.steps.flatMap((stepGroup, stepIdx) => {
                 if (stepGroup.subSteps.length === 0) {
+                  const step = stepById.get(stepGroup.stepId);
                   return (
                     <div
                       key={stepGroup.stepId}
-                      className={cn('flex shrink-0 items-center px-4', innerStepBorderR(stepIdx, stageGroup.steps.length))}
-                      style={{ width: STEP_WIDTH, height: COLLAPSED_LANE_H }}
+                      className={cn('shrink-0', innerStepBorderR(stepIdx, stageGroup.steps.length))}
+                      style={{ width: STEP_WIDTH, minHeight: STORYBOARD_COMPACT_ROW_H }}
                     >
-                      <span className="text-[11px] text-neutral-300">&nbsp;</span>
+                      <StoryboardCompactCell
+                        images={storyboardImagesByStep.get(stepGroup.stepId) ?? []}
+                        description={step?.description}
+                      />
                     </div>
                   );
                 }
 
-                return stepGroup.subSteps.map((subStep, subStepIdx) => {
-                  const n = storyboardImagesBySubStep.get(subStep.id)?.length ?? 0;
+                return stepGroup.subSteps.map((subStepRef, subStepIdx) => {
+                  const subStep = subStepById.get(subStepRef.id);
                   return (
                     <div
-                      key={subStep.id}
+                      key={subStepRef.id}
                       className={cn(
-                        'flex shrink-0 items-center px-4',
+                        'shrink-0',
                         innerSubStepBorderR(subStepIdx, stepGroup.subSteps.length, stepIdx, stageGroup.steps.length),
                       )}
-                      style={{ width: STEP_WIDTH, height: COLLAPSED_LANE_H }}
+                      style={{ width: STEP_WIDTH, minHeight: STORYBOARD_COMPACT_ROW_H }}
                     >
-                      {n > 0 ? (
-                        <span className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
-                          {n} image{n !== 1 ? 's' : ''}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-neutral-300">&nbsp;</span>
-                      )}
+                      <StoryboardCompactCell
+                        images={storyboardImagesBySubStep.get(subStepRef.id) ?? []}
+                        description={subStep?.description}
+                      />
                     </div>
                   );
                 });
               })
             ) : (
               stageGroup.steps.map((stepGroup, stepIdx) => {
-                const n = storyboardImagesByStep.get(stepGroup.stepId)?.length ?? 0;
-                const stepWidth = oneColumnPerStep ? STEP_WIDTH : STEP_WIDTH * stepGroup.span;
+                const step = stepById.get(stepGroup.stepId);
                 return (
                   <div
                     key={stepGroup.stepId}
-                    className={cn('flex shrink-0 items-center px-4', innerStepBorderR(stepIdx, stageGroup.steps.length))}
-                    style={{ width: stepWidth, height: COLLAPSED_LANE_H }}
+                    className={cn('shrink-0', innerStepBorderR(stepIdx, stageGroup.steps.length))}
+                    style={{
+                      width: oneColumnPerStep ? STEP_WIDTH : STEP_WIDTH * stepGroup.span,
+                      minHeight: STORYBOARD_COMPACT_ROW_H,
+                    }}
                   >
-                    {n > 0 ? (
-                      <span className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
-                        {n} image{n !== 1 ? 's' : ''}
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-neutral-300">&nbsp;</span>
-                    )}
+                    <StoryboardCompactCell
+                      images={storyboardImagesByStep.get(stepGroup.stepId) ?? []}
+                      description={step?.description}
+                    />
                   </div>
                 );
               })
@@ -554,7 +640,7 @@ export function L1StoryboardRow({
 
 interface L1StageOnlyStoryboardRowProps {
   stages: Stage[];
-  collapsed: boolean;
+  collapsed?: boolean;
   getStoryboardImagesForStage: (stageId: string) => StoryboardImage[];
   onAddImageAtStage: (stageId: string, dataUrl: string) => void;
   onUpdateImage: (id: string, dataUrl: string) => void;
@@ -565,7 +651,7 @@ interface L1StageOnlyStoryboardRowProps {
 
 export function L1StageOnlyStoryboardRow({
   stages,
-  collapsed,
+  collapsed = false,
   getStoryboardImagesForStage,
   onAddImageAtStage,
   onUpdateImage,
@@ -576,31 +662,22 @@ export function L1StageOnlyStoryboardRow({
   if (collapsed) {
     return (
       <L1LaneRowGrid leafColumnCount={leafColumnCount} includeAddColumn={includeAddColumn}>
-        {stages.map((stage) => {
-          const imageCount = getStoryboardImagesForStage(stage.id).length;
-          return (
-            <StageBounds
-              key={stage.id}
-              colCount={1}
-              gridSpan
-              className="bg-white"
-              style={{ height: COLLAPSED_LANE_H }}
-            >
-              <div
-                className="flex shrink-0 items-center px-4"
-                style={{ width: STEP_WIDTH, height: COLLAPSED_LANE_H }}
-              >
-                {imageCount > 0 ? (
-                  <span className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-500">
-                    {imageCount} image{imageCount !== 1 ? 's' : ''}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-neutral-300">&nbsp;</span>
-                )}
-              </div>
-            </StageBounds>
-          );
-        })}
+        {stages.map((stage) => (
+          <StageBounds
+            key={stage.id}
+            colCount={1}
+            gridSpan
+            className="bg-white"
+            style={{ minHeight: STORYBOARD_COMPACT_ROW_H }}
+          >
+            <div className="shrink-0" style={{ width: STEP_WIDTH, minHeight: STORYBOARD_COMPACT_ROW_H }}>
+              <StoryboardCompactCell
+                images={getStoryboardImagesForStage(stage.id)}
+                description={stage.description}
+              />
+            </div>
+          </StageBounds>
+        ))}
       </L1LaneRowGrid>
     );
   }

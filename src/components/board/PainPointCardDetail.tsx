@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { type Card } from '@/lib/types';
 import { useBlueprintStore } from '@/store/blueprint-store';
@@ -92,21 +93,32 @@ function JiraWikiDescription({ text }: { text: string }) {
 }
 
 interface PainPointCardDetailProps {
-  card: Card;
+  card?: Card | null;
+  issueKey?: string | null;
   onClose: () => void;
   panelRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function PainPointCardDetail({ card, onClose, panelRef }: PainPointCardDetailProps) {
+export function PainPointCardDetail({ card, issueKey, onClose, panelRef }: PainPointCardDetailProps) {
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
 
-  const issueKey = extractPainPointIssueKey(card);
-  const record = issueKey ? painPointRecords[issueKey] : undefined;
+  const resolvedIssueKey = issueKey?.trim() || (card ? extractPainPointIssueKey(card) : null);
+  const record = resolvedIssueKey ? painPointRecords[resolvedIssueKey] : undefined;
   const heading = formatPainPointHeading(
-    issueKey,
+    resolvedIssueKey,
     record?.summary,
-    issueKey ? 'Import pain point details to see the summary.' : card.title,
+    resolvedIssueKey
+      ? 'Import pain point details to see the summary.'
+      : card?.title ?? 'Pain point',
   );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
     <div
@@ -124,7 +136,7 @@ export function PainPointCardDetail({ card, onClose, panelRef }: PainPointCardDe
         >
           <X aria-hidden="true" className="h-4 w-4" />
         </button>
-        <PainPointBreadcrumb card={card} />
+        {card ? <PainPointBreadcrumb card={card} /> : null}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -154,7 +166,7 @@ export function PainPointCardDetail({ card, onClose, panelRef }: PainPointCardDe
             </section>
           )}
 
-          {!record && issueKey && (
+          {!record && resolvedIssueKey && (
             <p className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50 px-3 py-2 text-[12px] leading-relaxed text-neutral-600">
               Use Menu → Import → Pain point details to load metadata from your Jira export spreadsheet.
             </p>

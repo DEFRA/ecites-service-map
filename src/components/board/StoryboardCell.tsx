@@ -284,3 +284,70 @@ export function StoryboardCell({
     </>
   );
 }
+
+interface StoryboardCompactCellProps {
+  images: StoryboardImage[];
+  description?: string;
+}
+
+/** Compact storyboard layout: thumbnail left, description right. */
+export function StoryboardCompactCell({ images, description }: StoryboardCompactCellProps) {
+  const sorted = useMemo(
+    () => [...images].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [images],
+  );
+  const img = sorted[0];
+  const trimmed = description?.trim();
+  const [preview, setPreview] = useState<StoryboardImage | null>(null);
+
+  return (
+    <>
+      <div className="flex min-h-[88px] items-start gap-2 px-2 py-2">
+        {img ? (
+          <button
+            type="button"
+            onClick={() => setPreview(img)}
+            className="shrink-0 overflow-hidden rounded border border-neutral-200 bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            aria-label="Open image preview"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={img.dataUrl}
+              alt=""
+              className="block h-14 w-[72px] object-cover object-top"
+              draggable={false}
+            />
+          </button>
+        ) : (
+          <div
+            className="h-14 w-[72px] shrink-0 rounded border border-dashed border-neutral-200 bg-neutral-50"
+            aria-hidden="true"
+          />
+        )}
+        {trimmed ? (
+          <p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-snug text-neutral-600">
+            {trimmed}
+          </p>
+        ) : (
+          <span className="text-[12px] text-neutral-300">&nbsp;</span>
+        )}
+      </div>
+      <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
+        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden p-0 sm:max-w-[min(1200px,calc(100vw-2rem))]">
+          <DialogTitle className="sr-only">Image preview</DialogTitle>
+          <div className="max-h-[calc(100vh-2rem)] overflow-auto bg-neutral-950 p-3">
+            {preview && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={preview.dataUrl}
+                alt=""
+                className="mx-auto block h-auto max-w-full rounded bg-white"
+                draggable={false}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

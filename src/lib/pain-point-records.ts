@@ -33,6 +33,16 @@ const PAIN_POINT_STATUS_PILL: Record<string, string> = {
   'ecites can fix': 'bg-green-100 text-green-900 border-green-200',
 };
 
+const PAIN_POINT_STATUS_DOT: Record<string, string> = {
+  'cannot be fixed': 'bg-neutral-400',
+  'needs much x-gov help to fix': 'bg-red-500',
+  'needs some x-gov help to fix': 'bg-orange-500',
+  'apha can fix or mitigate': 'bg-amber-500',
+  'ecites introduces': 'bg-lime-500',
+  'ecites can mitigate': 'bg-emerald-500',
+  'ecites can fix': 'bg-green-500',
+};
+
 export function normalizePainPointStatus(status: string): string {
   return status.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -40,6 +50,12 @@ export function normalizePainPointStatus(status: string): string {
 export function painPointStatusPillClass(status: string): string {
   const key = normalizePainPointStatus(status);
   return PAIN_POINT_STATUS_PILL[key] ?? 'bg-neutral-100 text-neutral-700 border-neutral-200';
+}
+
+export function painPointStatusDotClass(status: string | null | undefined): string {
+  if (!status?.trim()) return 'bg-neutral-300';
+  const key = normalizePainPointStatus(status);
+  return PAIN_POINT_STATUS_DOT[key] ?? 'bg-neutral-300';
 }
 
 const ISSUE_KEY_PATTERN = new RegExp(`^(${INLINE_TRACEABILITY_CODE.source})$`);
@@ -78,6 +94,162 @@ export function formatPainPointHeading(
   if (issueKey) return issueKey;
   if (trimmedSummary) return trimmedSummary;
   return fallback;
+}
+
+export interface PainPointListEntry {
+  issueKey: string;
+  title: string;
+  status: string | null;
+}
+
+export function painPointStatusSortIndex(status: string | null): number {
+  if (!status?.trim()) return PAIN_POINT_STATUS_ORDER.length + 1;
+  const normalized = normalizePainPointStatus(status);
+  const index = PAIN_POINT_STATUS_ORDER.indexOf(
+    normalized as (typeof PAIN_POINT_STATUS_ORDER)[number],
+  );
+  return index === -1 ? PAIN_POINT_STATUS_ORDER.length : index;
+}
+
+/** Pain points from the spreadsheet upload, sorted easiest fix first then issue key. */
+export function buildSortedPainPointList(
+  records: Record<string, PainPointRecord>,
+): PainPointListEntry[] {
+  const entries = Object.values(records).map((record) => ({
+    issueKey: record.issueKey,
+    title: record.summary?.trim() || record.issueKey,
+    status: record.status?.trim() || null,
+  }));
+
+  return entries.sort((a, b) => {
+    const byStatus = painPointStatusSortIndex(b.status) - painPointStatusSortIndex(a.status);
+    if (byStatus !== 0) return byStatus;
+    return a.issueKey.localeCompare(b.issueKey, undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
+
+/** Sort pain point cards easiest fix first (eCITES can fix at the top). */
+export function sortPainPointCardsByStatus(
+  cards: Card[],
+  records: Record<string, PainPointRecord>,
+): Card[] {
+  return [...cards].sort((a, b) => {
+    const statusA = extractPainPointIssueKey(a);
+    const statusB = extractPainPointIssueKey(b);
+    const indexA = painPointStatusSortIndex(statusA ? records[statusA]?.status ?? null : null);
+    const indexB = painPointStatusSortIndex(statusB ? records[statusB]?.status ?? null : null);
+    const byStatus = indexB - indexA;
+    if (byStatus !== 0) return byStatus;
+    return a.order - b.order;
+  });
+}
+
+/** Distinct statuses from uploaded records, easiest fix first (matches list order). */
+export function collectPainPointRecordStatuses(
+  records: Record<string, PainPointRecord>,
+): string[] {
+  const seen = new Set<string>();
+  for (const record of Object.values(records)) {
+    const status = record.status?.trim();
+    if (status) seen.add(status);
+  }
+
+  return [...seen].sort(
+    (a, b) => painPointStatusSortIndex(b) - painPointStatusSortIndex(a),
+  );
+}
+
+export function filterPainPointListByStatuses(
+  entries: PainPointListEntry[],
+  selectedStatuses: Set<string> | null,
+): PainPointListEntry[] {
+  if (selectedStatuses === null) return entries;
+  return entries.filter((entry) => entry.status != null && selectedStatuses.has(entry.status));
+}
+
+export function painPointIssueKeyMatchesStatusFilter(
+  issueKey: string,
+  records: Record<string, PainPointRecord>,
+  selectedStatuses: Set<string> | null,
+): boolean {
+  if (selectedStatuses === null) return true;
+  const status = records[issueKey]?.status?.trim();
+  return status != null && selectedStatuses.has(status);
+}
+
+/** Unique pain point issue keys on the board per sub-step column. */
+export function buildPainPointsBySubStep(
+  cards: Card[],
+  records: Record<string, PainPointRecord>,
+  selectedStatuses: Set<string> | null = null,
+): Map<string, string[]> {
+  const bySubStep = new Map<string, Set<string>>();
+
+  for (const card of cards) {
+    if (card.laneKey !== 'pain_point' || !card.subStepId) continue;
+    const issueKey = extractPainPointIssueKey(card);
+    if (!issueKey) continue;
+    if (!painPointIssueKeyMatchesStatusFilter(issueKey, records, selectedStatuses)) continue;
+
+    const keys = bySubStep.get(card.subStepId) ?? new Set<string>();
+    keys.add(issueKey);
+    bySubStep.set(card.subStepId, keys);
+  }
+
+  const result = new Map<string, string[]>();
+  for (const [subStepId, keys] of bySubStep) {
+    result.set(
+      subStepId,
+      [...keys].sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+      ),
+    );
+  }
+  return result;
+}
+
+/** First pain point card on the board for a Jira issue key. */
+export function findPainPointCardForIssueKey(cards: Card[], issueKey: string): Card | undefined {
+  return cards.find(
+    (card) => card.laneKey === 'pain_point' && extractPainPointIssueKey(card) === issueKey,
+  );
+}
+
+/** Sub-step columns where a pain point issue key appears on the board. */
+export function findSubStepIdsForIssueKey(cards: Card[], issueKey: string): string[] {
+  const subStepIds = new Set<string>();
+  for (const card of cards) {
+    if (card.laneKey !== 'pain_point' || !card.subStepId) continue;
+    if (extractPainPointIssueKey(card) === issueKey) {
+      subStepIds.add(card.subStepId);
+    }
+  }
+  return [...subStepIds];
+}
+
+/** Sub-step columns with no pain point cards on the board. */
+export function findSubStepIdsWithoutPainPoints(
+  cards: Card[],
+  subSteps: { id: string }[],
+): string[] {
+  const withPainPoints = new Set<string>();
+  for (const card of cards) {
+    if (card.laneKey !== 'pain_point' || !card.subStepId) continue;
+    if (extractPainPointIssueKey(card)) {
+      withPainPoints.add(card.subStepId);
+    }
+  }
+  return subSteps.filter((subStep) => !withPainPoints.has(subStep.id)).map((subStep) => subStep.id);
+}
+
+/** Sub-step columns with pain points matching a status filter. */
+export function findSubStepIdsForStatusFilter(
+  cards: Card[],
+  records: Record<string, PainPointRecord>,
+  selectedStatuses: Set<string> | null,
+): string[] {
+  if (selectedStatuses === null) return [];
+  return [...buildPainPointsBySubStep(cards, records, selectedStatuses).keys()];
 }
 
 export type JiraWikiSegment = { text: string; bold?: boolean };
