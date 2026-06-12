@@ -74,7 +74,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-x-hidden bg-[#fafafa]">
+    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#fafafa]">
       <BoardToolbar
         onImportSpreadsheet={() => setShowImport(true)}
         appView={appView}

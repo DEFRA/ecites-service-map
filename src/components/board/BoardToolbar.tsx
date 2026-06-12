@@ -2,17 +2,12 @@
 
 import { useEffect, useState, useRef, type ChangeEvent } from 'react';
 import {
-  Plus,
   Upload,
   Download,
   Eye,
   EyeOff,
   ChevronDown,
-  Undo2,
-  Redo2,
   Film,
-  Save,
-  Check,
   List,
   ListTree,
   SquareStack,
@@ -21,7 +16,6 @@ import {
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { cn } from '@/lib/utils';
 import { getLaneTitle, L1_HIDDEN_LANE_KEYS, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES } from '@/lib/lane-definitions';
-import { useLibraryStore } from '@/store/library-store';
 import { exportBlueprintSpreadsheet, spreadsheetExportFilename } from '@/lib/export-spreadsheet';
 import {
   blueprintBackupExportFilename,
@@ -68,15 +62,6 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
-/** Compare serialized snapshots for library “dirty” checks; never throws (e.g. BigInt or circular refs). */
-function librarySnapshotsDiffer(a: unknown, b: unknown): boolean {
-  try {
-    return JSON.stringify(a) !== JSON.stringify(b);
-  } catch {
-    return true;
-  }
-}
-
 export function BoardToolbar({
   onImportSpreadsheet,
   appView = 'board',
@@ -107,7 +92,6 @@ export function BoardToolbar({
   const evidence = useBlueprintStore((s) => s.evidence);
   const traceabilityCounters = useBlueprintStore((s) => s.traceabilityCounters);
   const setServiceName = useBlueprintStore((s) => s.setServiceName);
-  const addStage = useBlueprintStore((s) => s.addStage);
   const toggleLane = useBlueprintStore((s) => s.toggleLane);
   const toggleStoryboardVisible = useBlueprintStore((s) => s.toggleStoryboardVisible);
   const toggleStepHeadersVisible = useBlueprintStore((s) => s.toggleStepHeadersVisible);
@@ -139,10 +123,6 @@ export function BoardToolbar({
   const importPainPointRecords = useBlueprintStore((s) => s.importPainPointRecords);
   const readOnly = useBlueprintStore((s) => s.readOnly);
 
-  const entries = useLibraryStore((s) => s.entries);
-  const hydrateLibrary = useLibraryStore((s) => s.hydrate);
-  const saveToLibrary = useLibraryStore((s) => s.save);
-
   const isChildView = Boolean(rootDocument && activeBlueprintId !== rootBlueprintId);
   const activeJourney = activeUserJourney(userJourneys, activeUserJourneyId);
   const boardHeading =
@@ -171,7 +151,6 @@ export function BoardToolbar({
   const [showMenu, setShowMenu] = useState(false);
   const [transferDialog, setTransferDialog] = useState<'import' | 'export' | null>(null);
   const [transferNotice, setTransferNotice] = useState('');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const nameRef = useRef<HTMLInputElement>(null);
   const lanesTriggerRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -179,10 +158,6 @@ export function BoardToolbar({
   const backupImportRef = useRef<HTMLInputElement>(null);
   const painPointImportRef = useRef<HTMLInputElement>(null);
 
-  const persistableDocument = useBlueprintStore.getState().getPersistableDocument();
-
-  const savedEntry = entries.find((e) => e.id === persistableDocument.blueprint.id);
-  const hasUnsavedLibraryChanges = !savedEntry || librarySnapshotsDiffer(savedEntry.state, persistableDocument);
   const contextualOpportunityCount = countContextualUserOpportunities(opportunities, cards);
 
   const saveName = () => {
@@ -319,21 +294,6 @@ export function BoardToolbar({
     onImportSpreadsheet?.();
   };
 
-  const handleQuickSaveToLibrary = () => {
-    saveToLibrary(useBlueprintStore.getState().getPersistableDocument());
-    setSaveStatus('saved');
-  };
-
-  useEffect(() => {
-    hydrateLibrary();
-  }, [hydrateLibrary]);
-
-  useEffect(() => {
-    if (saveStatus !== 'saved') return;
-    const timeout = window.setTimeout(() => setSaveStatus('idle'), 2000);
-    return () => window.clearTimeout(timeout);
-  }, [saveStatus]);
-
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().includes('MAC');
@@ -361,7 +321,7 @@ export function BoardToolbar({
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-neutral-200 bg-white px-5 py-3">
+      <header className="flex shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-5 py-3">
         {/* Blueprint name */}
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -452,52 +412,6 @@ export function BoardToolbar({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {!readOnly && (
-            <div className="mr-1 flex h-[34px] items-center rounded-lg border border-neutral-200 bg-white p-0 shadow-sm">
-              <button
-                onClick={undo}
-                disabled={!canUndo}
-                title="Undo (Cmd/Ctrl+Z)"
-                aria-label="Undo"
-                className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-l-lg text-neutral-600 transition-colors hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <Undo2 aria-hidden="true" className="h-4 w-4" />
-              </button>
-              <button
-                onClick={redo}
-                disabled={!canRedo}
-                title="Redo (Shift+Cmd/Ctrl+Z)"
-                aria-label="Redo"
-                className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-r-lg text-neutral-600 transition-colors hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <Redo2 aria-hidden="true" className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
-          {!readOnly && (hasUnsavedLibraryChanges || saveStatus === 'saved') && (
-            <button
-              onClick={handleQuickSaveToLibrary}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              {saveStatus === 'saved' ? (
-                <Check aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
-              ) : (
-                <Save aria-hidden="true" className="h-3.5 w-3.5" />
-              )}
-              {saveStatus === 'saved' ? 'Saved' : 'Save'}
-            </button>
-          )}
-
-          {!readOnly && (
-            <button
-              onClick={() => addStage((isL2Mode || isL3Mode) ? 'New step' : 'New stage')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <Plus aria-hidden="true" className="h-3.5 w-3.5" /> {(isL2Mode || isL3Mode) ? 'Step' : 'Stage'}
-            </button>
-          )}
-
           <div className="relative">
             <button
               ref={lanesTriggerRef}

@@ -14,7 +14,7 @@ import {
   type DragOverEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { ArrowUp, Hand, ImagePlus, Maximize2, Minimize2, Film, ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ImagePlus, Film, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { type Card, type LaneKey, type StoryboardImage } from '@/lib/types';
 import { LaneLabel } from './LaneLabel';
@@ -28,7 +28,6 @@ import { BlueprintCard } from './BlueprintCard';
 import { StoryboardCell, StoryboardCompactCell } from './StoryboardCell';
 import { ImageCropModal } from './ImageCropModal';
 import { CardDetailPanel } from './CardDetailPanel';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { DEFAULT_LANES, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES, L1_MACRO_LANE_KEYS } from '@/lib/lane-definitions';
 import { BOARD_STEP_WIDTH, BOARD_ADD_COLUMN_WIDTH, boardContentWidth, boardColumnGridStyle } from '@/lib/board-layout';
@@ -223,20 +222,15 @@ export function Board() {
   const selectCard = useBlueprintStore((s) => s.selectCard);
 
   const [activeCard, setActiveCard] = useState<Card | null>(null);
-  const [panMode, setPanMode] = useState(false);
   const [storyboardUploadStageId, setStoryboardUploadStageId] = useState<string | null>(null);
-  const [isPointerPanning, setIsPointerPanning] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Heights measured from right panel, mirrored to left panel
   const [stageRowH, setStageRowH] = useState(MIN_HIERARCHY_ROW_H);
   const [stepHeaderRowH, setStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
   const [subStepHeaderRowH, setSubStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
 
-  // Panel refs
-  const leftPanelRef = useRef<HTMLDivElement>(null);
-  const rightPanelRef = useRef<HTMLDivElement>(null);
   const boardRootRef = useRef<HTMLDivElement>(null);
+  const boardScrollRef = useRef<HTMLDivElement>(null);
 
   // Right-panel row refs for height measurement
   const rightStageRowRef = useRef<HTMLDivElement>(null);
@@ -248,40 +242,10 @@ export function Board() {
 
   const rightLaneRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const leftLaneRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const pointerPanRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    startLeft: number;
-    startTop: number;
-  } | null>(null);
 
   const getRenderedHeight = useCallback((el: Element | null) => {
     if (!el) return 0;
     return Math.round(el.getBoundingClientRect().height);
-  }, []);
-
-  // Bidirectional vertical scroll sync (guard against infinite loops)
-  const syncingRef = useRef(false);
-  const handleRightScroll = useCallback(() => {
-    if (syncingRef.current) return;
-    syncingRef.current = true;
-    requestAnimationFrame(() => {
-      if (leftPanelRef.current && rightPanelRef.current) {
-        leftPanelRef.current.scrollTop = rightPanelRef.current.scrollTop;
-      }
-      syncingRef.current = false;
-    });
-  }, []);
-  const handleLeftScroll = useCallback(() => {
-    if (syncingRef.current) return;
-    syncingRef.current = true;
-    requestAnimationFrame(() => {
-      if (rightPanelRef.current && leftPanelRef.current) {
-        rightPanelRef.current.scrollTop = leftPanelRef.current.scrollTop;
-      }
-      syncingRef.current = false;
-    });
   }, []);
 
   // Measure description row height (mirrors to left "Description" label).
@@ -849,15 +813,6 @@ export function Board() {
   }, [effectiveVisibleLanes, cards]);
 
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === boardRootRef.current);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const card = cards.find((c) => c.id === event.active.id);
@@ -883,7 +838,7 @@ export function Board() {
 
   const handleBoardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (isBoardInteractiveTarget(event.target)) return;
-    const panel = rightPanelRef.current;
+    const panel = boardScrollRef.current;
     if (!panel) return;
 
     switch (event.key) {
@@ -924,60 +879,6 @@ export function Board() {
     }
   }, []);
 
-  const handlePanPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!panMode || isBoardInteractiveTarget(event.target)) return;
-
-    const panel = rightPanelRef.current;
-    if (!panel) return;
-
-    pointerPanRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startLeft: panel.scrollLeft,
-      startTop: panel.scrollTop,
-    };
-    setIsPointerPanning(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  }, [panMode]);
-
-  const handlePanPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = pointerPanRef.current;
-    const panel = rightPanelRef.current;
-    if (!drag || !panel || drag.pointerId !== event.pointerId) return;
-
-    panel.scrollLeft = drag.startLeft - (event.clientX - drag.startX);
-    panel.scrollTop = drag.startTop - (event.clientY - drag.startY);
-  }, []);
-
-  const stopPanPointer = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
-    if (event && pointerPanRef.current && event.currentTarget.hasPointerCapture(pointerPanRef.current.pointerId)) {
-      event.currentTarget.releasePointerCapture(pointerPanRef.current.pointerId);
-    }
-    pointerPanRef.current = null;
-    setIsPointerPanning(false);
-  }, []);
-
-  const handleScrollToTop = useCallback(() => {
-    const panel = rightPanelRef.current;
-    if (!panel) return;
-    panel.scrollTo({ top: 0, behavior: 'smooth' });
-    focusBoardSurface();
-  }, [focusBoardSurface]);
-
-  const toggleFullscreen = useCallback(async () => {
-    const container = boardRootRef.current;
-    if (!container) return;
-
-    if (document.fullscreenElement === container) {
-      await document.exitFullscreen();
-      return;
-    }
-
-    await container.requestFullscreen();
-  }, []);
-
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveCard(null);
@@ -1008,10 +909,7 @@ export function Board() {
 
   // Reset scroll when the active blueprint changes.
   useEffect(() => {
-    const rightPanel = rightPanelRef.current;
-    const leftPanel = leftPanelRef.current;
-    rightPanel?.scrollTo({ left: 0, top: 0 });
-    if (leftPanel) leftPanel.scrollTop = 0;
+    boardScrollRef.current?.scrollTo({ left: 0, top: 0 });
     focusBoardSurface();
   }, [activeBlueprintId, focusBoardSurface]);
 
@@ -1073,30 +971,34 @@ export function Board() {
         aria-describedby="board-keyboard-help"
         onPointerDownCapture={handleBoardPointerDownCapture}
         onKeyDown={handleBoardKeyDown}
-        className="relative z-0 flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden bg-[#fafafa] outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#fafafa]"
+        className="relative z-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[#fafafa] outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#fafafa]"
       >
         <p id="board-keyboard-help" className="sr-only">
           Use the arrow keys to pan the board when this region is focused. Use Home and End to jump left and right, and Page Up and Page Down to move vertically.
         </p>
 
-        {/* ── LEFT PANEL: frozen label column ──────────────────────────────── */}
         <div
-          ref={leftPanelRef}
-          onScroll={handleLeftScroll}
-          className="flex w-[172px] shrink-0 flex-col overflow-y-scroll overflow-x-hidden border-r border-neutral-200 bg-[#fafafa] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          ref={boardScrollRef}
+          className="min-h-0 flex-1 overflow-auto bg-[#fafafa]"
         >
-          {/* Sticky header labels — heights mirror right panel header rows */}
+        <div className="flex items-start">
+        {/* ── LEFT PANEL: label column (row heights synced to right panel) ─── */}
+        <div
+          className="flex w-[172px] shrink-0 flex-col border-r border-neutral-200 bg-[#fafafa]"
+        >
+          {isL1MacroMode && showPhaseHeaderRow && (
+            <div
+              className="flex items-center border-b border-neutral-200 bg-neutral-50 px-4"
+              style={{ minHeight: 36 }}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                Phase
+              </span>
+            </div>
+          )}
+
+          {/* Sticky: stages, steps and sub-steps labels only */}
           <div className="sticky top-0 z-30 bg-[#fafafa]">
-            {isL1MacroMode && showPhaseHeaderRow && (
-              <div
-                className="flex items-center border-b border-neutral-200 bg-neutral-50 px-4"
-                style={{ minHeight: 36 }}
-              >
-                <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                  Phase
-                </span>
-              </div>
-            )}
             {showStageHeaderRow && (
             <div
               className="flex items-center border-b border-neutral-200 px-4"
@@ -1129,20 +1031,21 @@ export function Board() {
                 </span>
               </div>
             )}
+          </div>
 
-            {showSubSubStepRowInPanel && (
-              <div
-                className="flex items-center border-b border-neutral-200 px-4"
-                style={{ height: subStepHeaderRowH }}
-              >
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-                  Sub-sub-steps
-                </span>
-              </div>
-            )}
+          {showSubSubStepRowInPanel && (
+            <div
+              className="flex items-center border-b border-neutral-200 px-4"
+              style={{ height: subStepHeaderRowH }}
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Sub-sub-steps
+              </span>
+            </div>
+          )}
 
-            {/* Storyboard label — row height mirrors right panel; toggle stays compact at top. */}
-            {storyboardVisible && (
+          {/* Storyboard label — scrolls with storyboard row; height mirrors right panel. */}
+          {storyboardVisible && (
               <div
                 ref={leftStoryboardLabelRef}
                 className="group/storyboard flex items-start border-b border-neutral-200 px-3 py-3"
@@ -1175,8 +1078,6 @@ export function Board() {
                 </div>
               </div>
             )}
-
-          </div>
 
           {/* Lane labels — heights mirror right panel lane rows */}
           {effectiveVisibleLanes.map((lane, laneIdx) => {
@@ -1227,27 +1128,13 @@ export function Board() {
           })}
         </div>
 
-        {/* ── RIGHT PANEL: scrollable stage/step/cell content ──────────────── */}
+        {/* ── RIGHT PANEL: stage/step/cell content ─────────────────────────── */}
         <div
-          ref={rightPanelRef}
-          onScroll={handleRightScroll}
-          onPointerDown={handlePanPointerDown}
-          onPointerMove={handlePanPointerMove}
-          onPointerUp={stopPanPointer}
-          onPointerCancel={stopPanPointer}
-          className={cn(
-            'min-w-0 flex-1 overflow-auto bg-[#fafafa]',
-            panMode && 'cursor-grab',
-            isPointerPanning && 'cursor-grabbing',
-          )}
+          className="shrink-0 bg-[#fafafa]"
+          style={{ minWidth: contentWidth, width: contentWidth }}
         >
-          <div style={{ minWidth: contentWidth, width: contentWidth }}>
-
-            {/* Sticky header content — z-40 so lane rows (e.g. journey cards z-20–30) scroll beneath */}
-            <div className="sticky top-0 z-40 bg-white">
-
-              {/* Phase grouping row (L1 Macro only) */}
-              {showPhaseHeaderRow && phaseGroups.length > 0 && (() => {
+            {/* Phase grouping row (L1 Macro only) — scrolls away */}
+            {showPhaseHeaderRow && phaseGroups.length > 0 && (() => {
                 const distinctPhases = [...new Set(phaseGroups.map(pg => pg.phase).filter(Boolean))];
                 const phaseColorMap = new Map(distinctPhases.map((p, i) => [p, i]));
                 return (
@@ -1275,6 +1162,9 @@ export function Board() {
                   </div>
                 );
               })()}
+
+            {/* Sticky: stage, step and sub-step header rows only */}
+            <div className="sticky top-0 z-40 bg-white">
 
               {/* Stage row */}
               {showStageHeaderRow && (
@@ -1397,21 +1287,22 @@ export function Board() {
                   />
                 </div>
               )}
+            </div>
 
-              {showSubSubStepRowInPanel && activeL1Layout && (
-                <div style={{ height: subStepHeaderRowH }}>
-                  <L1SubSubStepRow
-                    layout={activeL1Layout}
-                    rowHeight={subStepHeaderRowH}
-                    leafColumnCount={totalStepColumns}
-                    includeAddColumn={includeAddColumn}
-                    getCardsForSubStepCell={getCardsForSubStepCell}
-                  />
-                </div>
-              )}
+            {showSubSubStepRowInPanel && activeL1Layout && (
+              <div style={{ height: subStepHeaderRowH }}>
+                <L1SubSubStepRow
+                  layout={activeL1Layout}
+                  rowHeight={subStepHeaderRowH}
+                  leafColumnCount={totalStepColumns}
+                  includeAddColumn={includeAddColumn}
+                  getCardsForSubStepCell={getCardsForSubStepCell}
+                />
+              </div>
+            )}
 
-              {/* Storyboard row — image thumbnails per step */}
-              {storyboardVisible && (
+            {/* Storyboard row — scrolls with lane content; image thumbnails per step */}
+            {storyboardVisible && (
               <div
                 ref={rightStoryboardRowRef}
                 className={cn(
@@ -1558,7 +1449,7 @@ export function Board() {
               </div>
             )}
 
-              {showJourneyContentRowInPanel && activeL1Layout && (
+            {showJourneyContentRowInPanel && activeL1Layout && (
                 <div
                   ref={rightDescriptionRowRef}
                   className={cn('flex flex-col', descriptionRowCollapsed && 'bg-neutral-50/80')}
@@ -1591,7 +1482,6 @@ export function Board() {
                   )}
                 </div>
               )}
-            </div>
 
             {/* Lane rows — cells only, no label (label is in left panel). */}
             {effectiveVisibleLanes.map((lane, laneIdx) => {
@@ -1743,72 +1633,11 @@ export function Board() {
                 </div>
               );
             })}
-          </div>
+        </div>
+        </div>
         </div>
 
         <CardDetailPanel />
-
-        <div
-          data-no-pan
-          className="pointer-events-none absolute bottom-4 right-4 z-30"
-        >
-          <div className="pointer-events-auto flex items-stretch gap-0 rounded-2xl border border-neutral-200/90 bg-white/95 p-1 shadow-[0_10px_30px_rgba(15,23,42,0.12)] backdrop-blur">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => setPanMode((current) => !current)}
-                    aria-label={panMode ? 'Disable pan mode' : 'Enable pan mode'}
-                    aria-pressed={panMode}
-                    className={cn(
-                      'inline-flex h-10 w-10 items-center justify-center rounded-xl text-neutral-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      panMode ? 'bg-blue-50 text-blue-700' : 'hover:bg-neutral-50',
-                    )}
-                  />
-                }
-              >
-                <Hand aria-hidden="true" className="h-4.5 w-4.5" />
-              </TooltipTrigger>
-              <TooltipContent className="items-center text-center">{panMode ? 'Disable hand panning' : 'Enable hand panning'}</TooltipContent>
-            </Tooltip>
-            <div className="my-1 w-px self-stretch bg-neutral-200" />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={handleScrollToTop}
-                    aria-label="Scroll board to top"
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-neutral-600 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  />
-                }
-              >
-                <ArrowUp aria-hidden="true" className="h-4.5 w-4.5" />
-              </TooltipTrigger>
-              <TooltipContent className="items-center text-center">Scroll to top</TooltipContent>
-            </Tooltip>
-            <div className="my-1 w-px self-stretch bg-neutral-200" />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => {
-                      void toggleFullscreen();
-                    }}
-                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-neutral-600 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  />
-                }
-              >
-                {isFullscreen ? (
-                  <Minimize2 aria-hidden="true" className="h-4.5 w-4.5" />
-                ) : (
-                  <Maximize2 aria-hidden="true" className="h-4.5 w-4.5" />
-                )}
-              </TooltipTrigger>
-              <TooltipContent className="items-center text-center">{isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
       </div>
 
       <DragOverlay dropAnimation={{ duration: 200, easing: 'ease' }}>
