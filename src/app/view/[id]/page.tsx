@@ -6,6 +6,7 @@ import { useBlueprintStore } from '@/store/blueprint-store';
 import { BoardToolbar } from '@/components/board/BoardToolbar';
 import { Board } from '@/components/board/Board';
 import { PainPointsPage } from '@/components/board/PainPointsPage';
+import { UserStoriesPage } from '@/components/board/UserStoriesPage';
 import type { BlueprintState } from '@/lib/types';
 
 type FetchState =
@@ -22,7 +23,7 @@ export default function ViewSharePage() {
   const stages = useBlueprintStore((s) => s.stages);
 
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'loading' });
-  const [appView, setAppView] = useState<'board' | 'pain_points'>('board');
+  const [appView, setAppView] = useState<'board' | 'pain_points' | 'user_stories'>('board');
 
   useEffect(() => {
     if (!id) return;
@@ -107,6 +108,8 @@ export default function ViewSharePage() {
         </div>
       ) : appView === 'pain_points' ? (
         <PainPointsPage />
+      ) : appView === 'user_stories' ? (
+        <UserStoriesPage />
       ) : (
         <Board />
       )}
