@@ -29,6 +29,7 @@ import {
   type StrategicGoal,
   type Outcome,
   type PainPointRecord,
+  type UserStoryRecord,
 } from '@/lib/types';
 import type { StoryboardAttachTarget } from '@/lib/storyboard-images';
 import { useLibraryStore } from '@/store/library-store';
@@ -37,7 +38,13 @@ import {
   createApiContractFromRequirement,
   createUiScaffoldFromRequirementAndApi,
 } from '@/lib/traceability/downstream';
-import { DEFAULT_LANES, L1_MACRO_LANES, L1_MACRO_LANE_KEYS, L3_LANE_KEYS } from '@/lib/lane-definitions';
+import {
+  DEFAULT_LANES,
+  L1_MACRO_LANES,
+  L1_MACRO_LANE_KEYS,
+  L3_LANE_KEYS,
+  mergeLaneDefinitions,
+} from '@/lib/lane-definitions';
 import { createSeedBlueprint } from '@/lib/seed-data';
 import { loadBundledCitesBlueprint, repairStaleCitesBlueprint } from '@/lib/import/cites-matrix';
 import {
@@ -48,6 +55,8 @@ import {
 import { buildEcitesLifecycleEntities } from '@/lib/ecites-lifecycle-data';
 import { isJourneyFilterLane } from '@/lib/journey-lane-filter';
 import { mergePainPointRecords } from '@/lib/pain-point-records';
+import { mergeUserStoryRecords } from '@/lib/user-story-records';
+import { mergeJiraIssueImportResult, type JiraIssueImportResult } from '@/lib/jira-issue-import';
 import {
   mergeStoryboardImagesIntoRoot,
   type StoryboardImportItem,
@@ -101,10 +110,25 @@ function isL1Blueprint(state: BlueprintState): boolean {
   return (state.lanes ?? []).some((lane) => L1_MACRO_LANE_KEYS.has(lane.key));
 }
 
-function pickBaseLanes(state: BlueprintState) {
+function pickBaseLanes(state: BlueprintState): LaneDefinition[] {
   const hasL1 = (state.lanes ?? []).some((l) => L1_MACRO_LANE_KEYS.has(l.key))
     || (state.cards ?? []).some((c) => L1_MACRO_LANE_KEYS.has(c.laneKey));
-  return hasL1 ? L1_MACRO_LANES : DEFAULT_LANES;
+  const base = hasL1 ? [...L1_MACRO_LANES] : [...DEFAULT_LANES];
+
+  const hasUserStoryCards = (state.cards ?? []).some((c) => c.laneKey === 'user_story');
+  if (hasUserStoryCards && !base.some((lane) => lane.key === 'user_story')) {
+    const userStoryLane = DEFAULT_LANES.find((lane) => lane.key === 'user_story');
+    if (userStoryLane) {
+      const painIdx = base.findIndex((lane) => lane.key === 'pain_point');
+      if (painIdx >= 0) {
+        base.splice(painIdx + 1, 0, userStoryLane);
+      } else {
+        base.push(userStoryLane);
+      }
+    }
+  }
+
+  return base;
 }
 
 function applyL3LaneVisibility(lanes: LaneDefinition[]): LaneDefinition[] {
@@ -223,7 +247,7 @@ function expandMergedCodedLaneCards(cards: Card[]): Card[] {
   const expanded: Card[] = [];
 
   for (const card of cards) {
-    if (card.laneKey !== 'pain_point' && card.laneKey !== 'user_need') {
+    if (card.laneKey !== 'pain_point' && card.laneKey !== 'user_need' && card.laneKey !== 'user_story') {
       expanded.push(card);
       continue;
     }
@@ -395,19 +419,7 @@ function stripSuccessMeasureReferenceText(card: Card): Card {
  */
 function normalizeChildTreeNode(child: BlueprintState, parent: BlueprintState): BlueprintState {
   const childBaseLanes = pickBaseLanes(child);
-  const childLanes = childBaseLanes.map((defaultLane) => {
-    const existingLane = (child.lanes ?? []).find((lane) => lane.key === defaultLane.key);
-    return existingLane
-      ? {
-          ...defaultLane,
-          ...existingLane,
-          title: defaultLane.title,
-          order: defaultLane.order,
-          visible: shouldForceLaneVisible(defaultLane.key) ? true : (existingLane.visible ?? defaultLane.visible),
-          collapsed: existingLane.collapsed ?? false,
-        }
-      : { ...defaultLane };
-  });
+  const childLanes = mergeLaneDefinitions(child.lanes ?? [], childBaseLanes, child.cards ?? []);
   const normalizedChildCards = removeEvidenceReferencePainPointCards(
     removeAreaReferenceBehaviourChangeCards(
       migrateStandaloneBehaviourChangeRollupCards(
@@ -506,9 +518,18 @@ function repairStoryboardAttachments(state: BlueprintState): BlueprintState {
   return { ...state, storyboardImages: relinked };
 }
 
+function laneForceVisibleKeys(state: BlueprintState): LaneKey[] {
+  const keys: LaneKey[] = [];
+  if ((state.cards ?? []).some((card) => card.laneKey === 'user_story')) keys.push('user_story');
+  if (Object.keys(state.userStoryRecords ?? {}).length > 0) keys.push('user_story');
+  return keys;
+}
+
 function normalizeState(state: BlueprintState): BlueprintState {
-  const lanesByKey = new Map(state.lanes.map((lane) => [lane.key, lane]));
   const baseLanes = pickBaseLanes(state);
+  const normalizedLanes = mergeLaneDefinitions(state.lanes ?? [], baseLanes, state.cards ?? [], {
+    forceVisibleLaneKeys: laneForceVisibleKeys(state),
+  });
   // Build the base normalized state first (backward-compat field defaults)
   const base: BlueprintState = {
     ...state,
@@ -532,10 +553,13 @@ function normalizeState(state: BlueprintState): BlueprintState {
     systemJourneyFilter: state.systemJourneyFilter ?? null,
     userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
     painPointJourneyFilter: state.painPointJourneyFilter ?? null,
+    userStoryJourneyFilter: state.userStoryJourneyFilter ?? null,
     userJourneys: state.userJourneys ?? [],
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userStoryRecords: { ...(state.userStoryRecords ?? {}) },
+    jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: state.cardLinks ?? [],
     evidence: state.evidence ?? [],
     opportunities: state.opportunities ?? [],
@@ -550,19 +574,7 @@ function normalizeState(state: BlueprintState): BlueprintState {
     uiScaffolds: state.uiScaffolds ?? [],
     // Backward compat: existing blueprints in localStorage won't have this field
     traceabilityCounters: state.traceabilityCounters ?? {},
-    lanes: baseLanes.map((defaultLane) => {
-      const existingLane = lanesByKey.get(defaultLane.key);
-      return existingLane
-        ? {
-            ...defaultLane,
-            ...existingLane,
-            title: defaultLane.title,
-            order: defaultLane.order,
-            visible: shouldForceLaneVisible(defaultLane.key) ? true : (existingLane.visible ?? defaultLane.visible),
-            collapsed: existingLane.collapsed ?? false,
-          }
-        : { ...defaultLane };
-    }),
+    lanes: normalizedLanes,
   };
 
   // Backfill traceability codes for any stage/step/card that was loaded without one.
@@ -719,6 +731,10 @@ interface BlueprintStore extends BlueprintState {
   importStoryboardImages: (imports: StoryboardImportItem[]) => StoryboardImportResult;
   /** Merge Jira pain point metadata keyed by issue key (e.g. CTS-95). */
   importPainPointRecords: (records: Record<string, PainPointRecord>) => number;
+  /** Merge Jira user story metadata keyed by issue key (e.g. CTS-165). */
+  importUserStoryRecords: (records: Record<string, UserStoryRecord>) => number;
+  /** Merge Jira issue metadata from a CSV or Excel export (routes by issue type). */
+  importJiraIssueMetadata: (result: Pick<JiraIssueImportResult, 'painPointRecords' | 'userStoryRecords' | 'jiraIssueRecords'>) => number;
   toggleStoryboardVisible: () => void;
   toggleDescriptionRowVisible: () => void;
   toggleDescriptionRowCollapsed: () => void;
@@ -735,6 +751,8 @@ interface BlueprintStore extends BlueprintState {
   setUserNeedJourneyFilter: (filter: string | null) => void;
   /** Filter visible sub-step columns to those with a matching pain point card (null = all). */
   setPainPointJourneyFilter: (filter: string | null) => void;
+  /** Filter visible sub-step columns to those with a matching user story status (null = all). */
+  setUserStoryJourneyFilter: (filter: string | null) => void;
   /** Switch between full lifecycle view and a user journey from the spreadsheet. */
   setActiveUserJourneyId: (journeyId: string | null) => void;
   /** Show or hide the hierarchy description row while a user journey is active. */
@@ -831,10 +849,13 @@ function emptyBlueprint(): BlueprintState {
     systemJourneyFilter: null,
     userNeedJourneyFilter: null,
     painPointJourneyFilter: null,
+    userStoryJourneyFilter: null,
     userJourneys: [],
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
     painPointRecords: {},
+    userStoryRecords: {},
+    jiraIssueRecords: {},
     cardLinks: [],
     evidence: [],
     opportunities: [],
@@ -882,6 +903,7 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     systemJourneyFilter: state.systemJourneyFilter ?? null,
     userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
     painPointJourneyFilter: state.painPointJourneyFilter ?? null,
+    userStoryJourneyFilter: state.userStoryJourneyFilter ?? null,
     userJourneys: (state.userJourneys ?? []).map((journey) => ({
       ...journey,
       subStepIds: [...journey.subStepIds],
@@ -890,6 +912,8 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userStoryRecords: { ...(state.userStoryRecords ?? {}) },
+    jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: state.cardLinks,
     evidence: state.evidence,
     opportunities: state.opportunities,
@@ -983,6 +1007,7 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     systemJourneyFilter: state.systemJourneyFilter ?? null,
     userNeedJourneyFilter: state.userNeedJourneyFilter ?? null,
     painPointJourneyFilter: state.painPointJourneyFilter ?? null,
+    userStoryJourneyFilter: state.userStoryJourneyFilter ?? null,
     userJourneys: (state.userJourneys ?? []).map((journey) => ({
       ...journey,
       subStepIds: [...journey.subStepIds],
@@ -991,6 +1016,8 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userStoryRecords: { ...(state.userStoryRecords ?? {}) },
+    jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: (state.cardLinks ?? []).map((l) => ({ ...l })),
     evidence: (state.evidence ?? []).map((e) => ({ ...e })),
     opportunities: (state.opportunities ?? []).map((o) => ({
@@ -1117,10 +1144,13 @@ function persist(state: BlueprintState) {
     systemJourneyFilter: forDisk.systemJourneyFilter ?? null,
     userNeedJourneyFilter: forDisk.userNeedJourneyFilter ?? null,
     painPointJourneyFilter: forDisk.painPointJourneyFilter ?? null,
+    userStoryJourneyFilter: forDisk.userStoryJourneyFilter ?? null,
     userJourneys: forDisk.userJourneys ?? [],
     activeUserJourneyId: forDisk.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: forDisk.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(forDisk.painPointRecords ?? {}) },
+    userStoryRecords: { ...(forDisk.userStoryRecords ?? {}) },
+    jiraIssueRecords: { ...(forDisk.jiraIssueRecords ?? {}) },
     cardLinks: forDisk.cardLinks,
     evidence: forDisk.evidence,
     opportunities: forDisk.opportunities,
@@ -2544,6 +2574,79 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
     return merged;
   },
 
+  importUserStoryRecords: (records) => {
+    let merged = 0;
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const userStoryRecords = mergeUserStoryRecords(current.userStoryRecords, records);
+      merged = Object.keys(records).length;
+      if (merged === 0) return s;
+
+      const baseLanes = pickBaseLanes(current);
+      const lanes = mergeLaneDefinitions(current.lanes ?? [], baseLanes, current.cards ?? [], {
+        forceVisibleLaneKeys: ['user_story'],
+      });
+
+      const nextDocument = cloneDocumentState({
+        ...current,
+        userStoryRecords,
+        lanes,
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return merged;
+  },
+
+  importJiraIssueMetadata: (result) => {
+    let merged = 0;
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const records = mergeJiraIssueImportResult(current, result);
+      merged =
+        Object.keys(result.painPointRecords).length
+        + Object.keys(result.userStoryRecords).length
+        + Object.keys(result.jiraIssueRecords).length;
+      if (merged === 0) return s;
+
+      const baseLanes = pickBaseLanes(current);
+      const lanes = mergeLaneDefinitions(current.lanes ?? [], baseLanes, current.cards ?? [], {
+        forceVisibleLaneKeys: Object.keys(result.userStoryRecords).length > 0 ? ['user_story'] : [],
+      });
+
+      const nextDocument = cloneDocumentState({
+        ...current,
+        ...records,
+        lanes,
+        blueprint: { ...current.blueprint, updatedAt: now() },
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+    return merged;
+  },
+
   removeStoryboardImage: (id) => {
     set((s) => {
       const current = cloneDocumentState(pickDocumentState(s));
@@ -2761,6 +2864,27 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const nextDocument = cloneDocumentState({
         ...current,
         painPointJourneyFilter: filter,
+      });
+      if (isSameDocument(current, nextDocument)) return s;
+      const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);
+      persist(nextDocument);
+      return {
+        ...s,
+        ...nextDocument,
+        _past: nextPast,
+        _future: [],
+        canUndo: nextPast.length > 0,
+        canRedo: false,
+      };
+    });
+  },
+
+  setUserStoryJourneyFilter: (filter) => {
+    set((s) => {
+      const current = cloneDocumentState(pickDocumentState(s));
+      const nextDocument = cloneDocumentState({
+        ...current,
+        userStoryJourneyFilter: filter,
       });
       if (isSameDocument(current, nextDocument)) return s;
       const nextPast = [...s._past, current].slice(-HISTORY_LIMIT);

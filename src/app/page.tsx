@@ -5,6 +5,7 @@ import { useBlueprintStore } from '@/store/blueprint-store';
 import { BoardToolbar } from '@/components/board/BoardToolbar';
 import { Board } from '@/components/board/Board';
 import { PainPointsPage } from '@/components/board/PainPointsPage';
+import { UserStoriesPage } from '@/components/board/UserStoriesPage';
 import { EmptyState } from '@/components/board/EmptyState';
 import { AiImportDialog } from '@/components/import/AiImportDialog';
 
@@ -33,7 +34,7 @@ export default function Home() {
   const updateStage = useBlueprintStore((s) => s.updateStage);
 
   const [showImport, setShowImport] = useState(false);
-  const [appView, setAppView] = useState<'board' | 'pain_points'>('board');
+  const [appView, setAppView] = useState<'board' | 'pain_points' | 'user_stories'>('board');
 
   useEffect(() => {
     hydrate();
@@ -84,6 +85,8 @@ export default function Home() {
         <EmptyState onImport={() => setShowImport(true)} />
       ) : appView === 'pain_points' ? (
         <PainPointsPage />
+      ) : appView === 'user_stories' ? (
+        <UserStoriesPage />
       ) : (
         <Board />
       )}

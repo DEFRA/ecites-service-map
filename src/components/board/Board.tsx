@@ -36,6 +36,7 @@ import { buildL1BoardLayout } from '@/lib/board-columns';
 import {
   collectJourneyLaneTypes,
   collectPainPointStatuses,
+  collectUserStoryStatuses,
   countHiddenJourneyLaneTypes,
   displayJourneyLaneCards,
   filterL1BoardLayout,
@@ -62,7 +63,13 @@ import { StageBounds, stageColCount, stepDividerClass, STAGE_BOUNDARY_CLASS } fr
 import { BoardAddColumnSpacer } from './BoardAddColumnSpacer';
 
 const FRONTSTAGE_BOUNDARY_KEY = 'frontstage_touchpoint';
-const NON_COLLAPSIBLE_LANE_KEYS = new Set<LaneKey>(['actor', 'system', 'user_need', 'pain_point']);
+const NON_COLLAPSIBLE_LANE_KEYS = new Set<LaneKey>([
+  'actor',
+  'system',
+  'user_need',
+  'pain_point',
+  'user_story',
+]);
 
 const STEP_WIDTH = BOARD_STEP_WIDTH;
 const ADD_COLUMN_WIDTH = BOARD_ADD_COLUMN_WIDTH;
@@ -209,7 +216,10 @@ export function Board() {
   const setUserNeedJourneyFilter = useBlueprintStore((s) => s.setUserNeedJourneyFilter);
   const painPointJourneyFilter = useBlueprintStore((s) => s.painPointJourneyFilter ?? null);
   const setPainPointJourneyFilter = useBlueprintStore((s) => s.setPainPointJourneyFilter);
+  const userStoryJourneyFilter = useBlueprintStore((s) => s.userStoryJourneyFilter ?? null);
+  const setUserStoryJourneyFilter = useBlueprintStore((s) => s.setUserStoryJourneyFilter);
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
+  const userStoryRecords = useBlueprintStore((s) => s.userStoryRecords ?? {});
   const userJourneys = useBlueprintStore((s) => s.userJourneys ?? []);
   const activeUserJourneyId = useBlueprintStore((s) => s.activeUserJourneyId ?? null);
   const descriptionVisibleInUserJourney = useBlueprintStore(
@@ -229,22 +239,31 @@ export function Board() {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Heights measured from right panel, mirrored to left panel
+  const [phaseRowH, setPhaseRowH] = useState(36);
   const [stageRowH, setStageRowH] = useState(MIN_HIERARCHY_ROW_H);
   const [stepHeaderRowH, setStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
   const [subStepHeaderRowH, setSubStepHeaderRowH] = useState(MIN_HIERARCHY_ROW_H);
+  const [subSubStepRowH, setSubSubStepRowH] = useState(MIN_HIERARCHY_ROW_H);
 
   // Panel refs
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
+  const hierarchyHScrollRef = useRef<HTMLDivElement>(null);
+  const bodyHScrollRef = useRef<HTMLDivElement>(null);
   const boardRootRef = useRef<HTMLDivElement>(null);
 
   // Right-panel row refs for height measurement
+  const leftStickyRef = useRef<HTMLDivElement>(null);
+  const rightStickyRef = useRef<HTMLDivElement>(null);
+  const rightPhaseRowRef = useRef<HTMLDivElement>(null);
   const rightStageRowRef = useRef<HTMLDivElement>(null);
   const rightDescriptionRowRef = useRef<HTMLDivElement>(null);
   const rightStepHeaderRowRef = useRef<HTMLDivElement>(null);
   const rightSubStepHeaderRowRef = useRef<HTMLDivElement>(null);
+  const rightSubSubStepRowRef = useRef<HTMLDivElement>(null);
   const rightStoryboardRowRef = useRef<HTMLDivElement>(null);
   const leftStoryboardLabelRef = useRef<HTMLDivElement>(null);
+  const leftDescriptionLabelRef = useRef<HTMLDivElement>(null);
 
   const rightLaneRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const leftLaneRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -263,6 +282,7 @@ export function Board() {
 
   // Bidirectional vertical scroll sync (guard against infinite loops)
   const syncingRef = useRef(false);
+  const syncingHorizontalRef = useRef(false);
   const handleRightScroll = useCallback(() => {
     if (syncingRef.current) return;
     syncingRef.current = true;
@@ -283,6 +303,24 @@ export function Board() {
       syncingRef.current = false;
     });
   }, []);
+  const syncHorizontalScroll = useCallback((source: 'hierarchy' | 'body') => {
+    if (syncingHorizontalRef.current) return;
+    syncingHorizontalRef.current = true;
+    const hierarchy = hierarchyHScrollRef.current;
+    const body = bodyHScrollRef.current;
+    if (hierarchy && body) {
+      const scrollLeft = source === 'body' ? body.scrollLeft : hierarchy.scrollLeft;
+      if (source === 'body') hierarchy.scrollLeft = scrollLeft;
+      else body.scrollLeft = scrollLeft;
+    }
+    syncingHorizontalRef.current = false;
+  }, []);
+  const handleHierarchyHorizontalScroll = useCallback(() => {
+    syncHorizontalScroll('hierarchy');
+  }, [syncHorizontalScroll]);
+  const handleBodyHorizontalScroll = useCallback(() => {
+    syncHorizontalScroll('body');
+  }, [syncHorizontalScroll]);
 
   // Measure description row height (mirrors to left "Description" label).
   // Depends on whether any stage has a description — when that flips from
@@ -396,6 +434,19 @@ export function Board() {
   const showSubSubStepRowInPanel = showSubSubStepRow && storyboardHierarchyOpen;
 
   useLayoutEffect(() => {
+    const el = rightPhaseRowRef.current;
+    if (!el || !showPhaseHeaderRow) return;
+    const initialHeight = getRenderedHeight(el);
+    if (initialHeight > 0) setPhaseRowH(initialHeight);
+    const obs = new ResizeObserver(([entry]) => {
+      const h = getRenderedHeight(entry.target);
+      if (h > 0) setPhaseRowH((prev) => (Math.abs(prev - h) <= 1 ? prev : h));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [getRenderedHeight, showPhaseHeaderRow]);
+
+  useLayoutEffect(() => {
     const el = rightStageRowRef.current;
     if (!el || !showStageHeaderRow) return;
     const initialHeight = getRenderedHeight(el);
@@ -426,6 +477,10 @@ export function Board() {
     () => collectPainPointStatuses(cards, painPointRecords),
     [cards, painPointRecords],
   );
+  const userStoryTypes = useMemo(
+    () => collectUserStoryStatuses(cards, userStoryRecords),
+    [cards, userStoryRecords],
+  );
 
   const journeyFilterLaneConfig = useMemo(
     (): Record<
@@ -436,6 +491,7 @@ export function Board() {
       system: { types: systemTypes, filter: systemJourneyFilter, setFilter: setSystemJourneyFilter },
       user_need: { types: userNeedTypes, filter: userNeedJourneyFilter, setFilter: setUserNeedJourneyFilter },
       pain_point: { types: painPointTypes, filter: painPointJourneyFilter, setFilter: setPainPointJourneyFilter },
+      user_story: { types: userStoryTypes, filter: userStoryJourneyFilter, setFilter: setUserStoryJourneyFilter },
     }),
     [
       actorTypes,
@@ -450,6 +506,9 @@ export function Board() {
       painPointTypes,
       painPointJourneyFilter,
       setPainPointJourneyFilter,
+      userStoryTypes,
+      userStoryJourneyFilter,
+      setUserStoryJourneyFilter,
     ],
   );
 
@@ -467,7 +526,8 @@ export function Board() {
       system: systemJourneyFilter,
       user_need: userNeedJourneyFilter,
       pain_point: painPointJourneyFilter,
-    }, l1Layout, painPointRecords);
+      user_story: userStoryJourneyFilter,
+    }, l1Layout, { painPointRecords, userStoryRecords });
     if (laneFilterIds) sets.push(laneFilterIds);
     if (sets.length === 0) return null;
     return intersectSubStepIdSets(sets);
@@ -477,9 +537,11 @@ export function Board() {
     systemJourneyFilter,
     userNeedJourneyFilter,
     painPointJourneyFilter,
+    userStoryJourneyFilter,
     activeJourney,
     l1Layout,
     painPointRecords,
+    userStoryRecords,
   ]);
 
   const displayL1Layout = useMemo(() => {
@@ -520,6 +582,13 @@ export function Board() {
       setPainPointJourneyFilter(null);
     }
   }, [showJourneyLaneFilters, painPointJourneyFilter, painPointTypes, setPainPointJourneyFilter]);
+
+  useEffect(() => {
+    if (!showJourneyLaneFilters || userStoryJourneyFilter === null) return;
+    if (!userStoryTypes.includes(userStoryJourneyFilter)) {
+      setUserStoryJourneyFilter(null);
+    }
+  }, [showJourneyLaneFilters, userStoryJourneyFilter, userStoryTypes, setUserStoryJourneyFilter]);
 
   const phaseGroups = useMemo(() => {
     if (!isL1MacroMode) return [];
@@ -573,6 +642,19 @@ export function Board() {
     return () => obs.disconnect();
   }, [getRenderedHeight, showSubStepHeaders, subSteps, steps]);
 
+  useLayoutEffect(() => {
+    const el = rightSubSubStepRowRef.current;
+    if (!el || !showSubSubStepRowInPanel) return;
+    const initialHeight = getRenderedHeight(el);
+    if (initialHeight > 0) setSubSubStepRowH(initialHeight);
+    const obs = new ResizeObserver(([entry]) => {
+      const h = getRenderedHeight(entry.target);
+      if (h > 0) setSubSubStepRowH((prev) => (Math.abs(prev - h) <= 1 ? prev : h));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [getRenderedHeight, showSubSubStepRowInPanel, subSteps, steps]);
+
   const cardsMap = useMemo(() => {
     const map = new Map<string, Card[]>();
     for (const card of cards) {
@@ -606,11 +688,12 @@ export function Board() {
   );
 
   const journeyFilterOptionsForLane = useCallback(
-    (laneKey: LaneKey) =>
-      laneKey === 'pain_point'
-        ? { laneKey, painPointRecords }
-        : undefined,
-    [painPointRecords],
+    (laneKey: LaneKey) => {
+      if (laneKey === 'pain_point') return { laneKey, painPointRecords };
+      if (laneKey === 'user_story') return { laneKey, userStoryRecords };
+      return undefined;
+    },
+    [painPointRecords, userStoryRecords],
   );
 
   const displayLaneCellCards = useCallback(
@@ -750,32 +833,49 @@ export function Board() {
   const showJourneyDescriptionRowForLayout = showJourneyDescriptionRow || showHierarchyDescriptionInJourney;
   const showJourneyContentRowInPanel = showJourneyContentRow && !storyboardCollapsed;
 
-  // Sync storyboard label height: spans storyboard row plus description row on the right.
+  // Sync storyboard label height to the storyboard row on the right.
   useLayoutEffect(() => {
     const leftEl = leftStoryboardLabelRef.current;
     if (!leftEl || !storyboardVisible) return;
     const rightStoryboard = rightStoryboardRowRef.current;
-    const rightDescription = rightDescriptionRowRef.current;
     const sync = () => {
-      let h = rightStoryboard?.offsetHeight ?? (storyboardCollapsed ? STORYBOARD_COMPACT_ROW_H : STORYBOARD_ROW_H);
-      if (showJourneyContentRowInPanel && rightDescription) {
-        h += rightDescription.offsetHeight;
-      }
+      const h = rightStoryboard?.offsetHeight ?? (storyboardCollapsed ? STORYBOARD_COMPACT_ROW_H : STORYBOARD_ROW_H);
       if (h > 0) leftEl.style.height = `${h}px`;
     };
     sync();
     const obs = new ResizeObserver(sync);
     if (rightStoryboard) obs.observe(rightStoryboard);
-    if (showJourneyContentRowInPanel && rightDescription) obs.observe(rightDescription);
     return () => obs.disconnect();
   }, [
     storyboardVisible,
     storyboardCollapsed,
+    storyboardLevel,
+    boardStages,
+    subSteps,
+    showJourneyContentRowInPanel,
+    descriptionRowCollapsed,
+  ]);
+
+  // Sync description label height to the description row on the right.
+  useLayoutEffect(() => {
+    const leftEl = leftDescriptionLabelRef.current;
+    if (!leftEl || !showJourneyContentRowInPanel) return;
+    const rightDescription = rightDescriptionRowRef.current;
+    const sync = () => {
+      const h = rightDescription?.offsetHeight ?? 0;
+      if (h > 0) leftEl.style.height = `${h}px`;
+    };
+    sync();
+    const obs = new ResizeObserver(sync);
+    if (rightDescription) obs.observe(rightDescription);
+    return () => obs.disconnect();
+  }, [
     showJourneyContentRowInPanel,
     descriptionRowCollapsed,
     storyboardLevel,
     boardStages,
     subSteps,
+    activeJourney,
   ]);
 
   const storyboardImageIndex = useMemo(
@@ -846,7 +946,7 @@ export function Board() {
       cleanups.push(() => obs.disconnect());
     }
     return () => cleanups.forEach((fn) => fn());
-  }, [effectiveVisibleLanes, cards]);
+  }, [effectiveVisibleLanes, cards, storyboardVisible, storyboardCollapsed, showJourneyContentRowInPanel, descriptionRowCollapsed]);
 
 
   useEffect(() => {
@@ -884,16 +984,17 @@ export function Board() {
   const handleBoardKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (isBoardInteractiveTarget(event.target)) return;
     const panel = rightPanelRef.current;
+    const body = bodyHScrollRef.current;
     if (!panel) return;
 
     switch (event.key) {
       case 'ArrowLeft':
         event.preventDefault();
-        panel.scrollBy({ left: -HORIZONTAL_PAN_STEP });
+        body?.scrollBy({ left: -HORIZONTAL_PAN_STEP });
         break;
       case 'ArrowRight':
         event.preventDefault();
-        panel.scrollBy({ left: HORIZONTAL_PAN_STEP });
+        body?.scrollBy({ left: HORIZONTAL_PAN_STEP });
         break;
       case 'ArrowUp':
         event.preventDefault();
@@ -905,11 +1006,11 @@ export function Board() {
         break;
       case 'Home':
         event.preventDefault();
-        panel.scrollTo({ left: 0, top: panel.scrollTop });
+        body?.scrollTo({ left: 0 });
         break;
       case 'End':
         event.preventDefault();
-        panel.scrollTo({ left: panel.scrollWidth, top: panel.scrollTop });
+        if (body) body.scrollTo({ left: body.scrollWidth });
         break;
       case 'PageUp':
         event.preventDefault();
@@ -928,13 +1029,14 @@ export function Board() {
     if (!panMode || isBoardInteractiveTarget(event.target)) return;
 
     const panel = rightPanelRef.current;
-    if (!panel) return;
+    const body = bodyHScrollRef.current;
+    if (!panel || !body) return;
 
     pointerPanRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      startLeft: panel.scrollLeft,
+      startLeft: body.scrollLeft,
       startTop: panel.scrollTop,
     };
     setIsPointerPanning(true);
@@ -945,11 +1047,13 @@ export function Board() {
   const handlePanPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = pointerPanRef.current;
     const panel = rightPanelRef.current;
-    if (!drag || !panel || drag.pointerId !== event.pointerId) return;
+    const body = bodyHScrollRef.current;
+    if (!drag || !panel || !body || drag.pointerId !== event.pointerId) return;
 
-    panel.scrollLeft = drag.startLeft - (event.clientX - drag.startX);
+    body.scrollLeft = drag.startLeft - (event.clientX - drag.startX);
     panel.scrollTop = drag.startTop - (event.clientY - drag.startY);
-  }, []);
+    syncHorizontalScroll('body');
+  }, [syncHorizontalScroll]);
 
   const stopPanPointer = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
     if (event && pointerPanRef.current && event.currentTarget.hasPointerCapture(pointerPanRef.current.pointerId)) {
@@ -1010,7 +1114,11 @@ export function Board() {
   useEffect(() => {
     const rightPanel = rightPanelRef.current;
     const leftPanel = leftPanelRef.current;
-    rightPanel?.scrollTo({ left: 0, top: 0 });
+    const hierarchy = hierarchyHScrollRef.current;
+    const body = bodyHScrollRef.current;
+    rightPanel?.scrollTo({ top: 0 });
+    if (hierarchy) hierarchy.scrollLeft = 0;
+    if (body) body.scrollLeft = 0;
     if (leftPanel) leftPanel.scrollTop = 0;
     focusBoardSurface();
   }, [activeBlueprintId, focusBoardSurface]);
@@ -1086,11 +1194,11 @@ export function Board() {
           className="flex w-[172px] shrink-0 flex-col overflow-y-scroll overflow-x-hidden border-r border-neutral-200 bg-[#fafafa] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {/* Sticky header labels — heights mirror right panel header rows */}
-          <div className="sticky top-0 z-30 bg-[#fafafa]">
+          <div ref={leftStickyRef} className="sticky top-0 z-30 shrink-0 overflow-hidden bg-[#fafafa]">
             {isL1MacroMode && showPhaseHeaderRow && (
               <div
                 className="flex items-center border-b border-neutral-200 bg-neutral-50 px-4"
-                style={{ minHeight: 36 }}
+                style={{ height: phaseRowH }}
               >
                 <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
                   Phase
@@ -1133,7 +1241,7 @@ export function Board() {
             {showSubSubStepRowInPanel && (
               <div
                 className="flex items-center border-b border-neutral-200 px-4"
-                style={{ height: subStepHeaderRowH }}
+                style={{ height: subSubStepRowH }}
               >
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
                   Sub-sub-steps
@@ -1141,42 +1249,53 @@ export function Board() {
               </div>
             )}
 
-            {/* Storyboard label — row height mirrors right panel; toggle stays compact at top. */}
-            {storyboardVisible && (
-              <div
-                ref={leftStoryboardLabelRef}
-                className="group/storyboard flex items-start border-b border-neutral-200 px-3 py-3"
-              >
-                <div
-                  className={cn(
-                    'flex w-full items-center gap-2 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 text-neutral-600 transition-colors',
-                    storyboardCollapsed ? 'px-3 py-1.5' : 'px-3 py-2',
-                  )}
-                >
-                  <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
-                    {isL3Mode ? 'Screens' : 'Storyboard'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={toggleStoryboardCollapsed}
-                    aria-label={`${
-                      storyboardCollapsed ? 'Expand' : 'Collapse'
-                    } ${isL3Mode ? 'Screens' : 'Storyboard'}`}
-                    aria-expanded={!storyboardCollapsed}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/80 transition-colors hover:bg-white/60 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  >
-                    {storyboardCollapsed ? (
-                      <ChevronUp aria-hidden="true" className="h-4 w-4" />
-                    ) : (
-                      <ChevronDown aria-hidden="true" className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-
           </div>
+
+          {/* Storyboard label — scrolls with storyboard row (not sticky). */}
+          {storyboardVisible && (
+            <div
+              ref={leftStoryboardLabelRef}
+              className="group/storyboard flex shrink-0 items-start overflow-hidden border-b border-neutral-200 px-3 py-3"
+            >
+              <div
+                className={cn(
+                  'flex w-full items-center gap-2 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 text-neutral-600 transition-colors',
+                  storyboardCollapsed ? 'px-3 py-1.5' : 'px-3 py-2',
+                )}
+              >
+                <Film aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                <span className="min-w-0 flex-1 text-[13px] font-semibold leading-tight tracking-tight">
+                  {isL3Mode ? 'Screens' : 'Storyboard'}
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleStoryboardCollapsed}
+                  aria-label={`${
+                    storyboardCollapsed ? 'Expand' : 'Collapse'
+                  } ${isL3Mode ? 'Screens' : 'Storyboard'}`}
+                  aria-expanded={!storyboardCollapsed}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-current/80 transition-colors hover:bg-white/60 hover:text-current focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  {storyboardCollapsed ? (
+                    <ChevronUp aria-hidden="true" className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown aria-hidden="true" className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showJourneyContentRowInPanel && (
+            <div
+              ref={leftDescriptionLabelRef}
+              className="flex shrink-0 items-start overflow-hidden border-b border-neutral-200 px-4 py-3"
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Description
+              </span>
+            </div>
+          )}
 
           {/* Lane labels — heights mirror right panel lane rows */}
           {effectiveVisibleLanes.map((lane, laneIdx) => {
@@ -1236,22 +1355,28 @@ export function Board() {
           onPointerUp={stopPanPointer}
           onPointerCancel={stopPanPointer}
           className={cn(
-            'min-w-0 flex-1 overflow-auto bg-[#fafafa]',
+            'min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#fafafa]',
             panMode && 'cursor-grab',
             isPointerPanning && 'cursor-grabbing',
           )}
         >
-          <div style={{ minWidth: contentWidth, width: contentWidth }}>
-
-            {/* Sticky header content — z-40 so lane rows (e.g. journey cards z-20–30) scroll beneath */}
-            <div className="sticky top-0 z-40 bg-white">
+          {/* Sticky hierarchy rows — horizontally synced with storyboard and lanes below. */}
+          <div
+            ref={hierarchyHScrollRef}
+            onScroll={handleHierarchyHorizontalScroll}
+            className="sticky top-0 z-40 overflow-x-auto bg-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            <div ref={rightStickyRef} style={{ minWidth: contentWidth, width: contentWidth }}>
 
               {/* Phase grouping row (L1 Macro only) */}
               {showPhaseHeaderRow && phaseGroups.length > 0 && (() => {
                 const distinctPhases = [...new Set(phaseGroups.map(pg => pg.phase).filter(Boolean))];
                 const phaseColorMap = new Map(distinctPhases.map((p, i) => [p, i]));
                 return (
-                  <div style={{ ...boardColumnGridStyle(totalStepColumns, includeAddColumn), minHeight: 36 }}>
+                  <div
+                    ref={rightPhaseRowRef}
+                    style={{ ...boardColumnGridStyle(totalStepColumns, includeAddColumn), height: phaseRowH }}
+                  >
                     {phaseGroups.map((pg, idx) => (
                       <div
                         key={`${pg.stageIds[0]}-${idx}`}
@@ -1399,16 +1524,27 @@ export function Board() {
               )}
 
               {showSubSubStepRowInPanel && activeL1Layout && (
-                <div style={{ height: subStepHeaderRowH }}>
+                <div ref={rightSubSubStepRowRef} style={{ height: subSubStepRowH }}>
                   <L1SubSubStepRow
                     layout={activeL1Layout}
-                    rowHeight={subStepHeaderRowH}
+                    rowHeight={subSubStepRowH}
                     leafColumnCount={totalStepColumns}
                     includeAddColumn={includeAddColumn}
                     getCardsForSubStepCell={getCardsForSubStepCell}
                   />
                 </div>
               )}
+
+            </div>
+          </div>
+
+          {/* Storyboard, description, and lanes — horizontal scroll (synced with hierarchy above). */}
+          <div
+            ref={bodyHScrollRef}
+            onScroll={handleBodyHorizontalScroll}
+            className="overflow-x-auto overflow-y-visible"
+          >
+            <div style={{ minWidth: contentWidth, width: contentWidth }}>
 
               {/* Storyboard row — image thumbnails per step */}
               {storyboardVisible && (
@@ -1558,40 +1694,39 @@ export function Board() {
               </div>
             )}
 
-              {showJourneyContentRowInPanel && activeL1Layout && (
-                <div
-                  ref={rightDescriptionRowRef}
-                  className={cn('flex flex-col', descriptionRowCollapsed && 'bg-neutral-50/80')}
-                  style={descriptionRowCollapsed ? { height: COLLAPSED_LANE_H } : undefined}
-                >
-                  {!descriptionRowCollapsed && (
-                    <>
-                      {showUserJourneyDescriptionRow && activeJourney && (
-                        <L1UserJourneyRow
-                          journey={activeJourney}
-                          layout={activeL1Layout}
-                          leafColumnCount={totalStepColumns}
-                          includeAddColumn={includeAddColumn}
-                        />
-                      )}
-                      {showJourneyDescriptionRowForLayout && (
-                        <L1JourneyDescriptionRow
-                          level={storyboardLevel}
-                          layout={activeL1Layout}
-                          stages={boardStages}
-                          steps={steps}
-                          subSteps={subSteps}
-                          oneColumnPerStep={useStepOnlyColumns}
-                          stageOnly={useStageOnlyColumns}
-                          leafColumnCount={totalStepColumns}
-                          includeAddColumn={includeAddColumn && !showUserJourneyDescriptionRow}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            {showJourneyContentRowInPanel && activeL1Layout && (
+              <div
+                ref={rightDescriptionRowRef}
+                className={cn('flex flex-col', descriptionRowCollapsed && 'bg-neutral-50/80')}
+                style={descriptionRowCollapsed ? { height: COLLAPSED_LANE_H } : undefined}
+              >
+                {!descriptionRowCollapsed && (
+                  <>
+                    {showUserJourneyDescriptionRow && activeJourney && (
+                      <L1UserJourneyRow
+                        journey={activeJourney}
+                        layout={activeL1Layout}
+                        leafColumnCount={totalStepColumns}
+                        includeAddColumn={includeAddColumn}
+                      />
+                    )}
+                    {showJourneyDescriptionRowForLayout && (
+                      <L1JourneyDescriptionRow
+                        level={storyboardLevel}
+                        layout={activeL1Layout}
+                        stages={boardStages}
+                        steps={steps}
+                        subSteps={subSteps}
+                        oneColumnPerStep={useStepOnlyColumns}
+                        stageOnly={useStageOnlyColumns}
+                        leafColumnCount={totalStepColumns}
+                        includeAddColumn={includeAddColumn && !showUserJourneyDescriptionRow}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Lane rows — cells only, no label (label is in left panel). */}
             {effectiveVisibleLanes.map((lane, laneIdx) => {
@@ -1743,6 +1878,7 @@ export function Board() {
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
 

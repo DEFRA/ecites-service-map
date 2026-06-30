@@ -2,17 +2,12 @@
 
 import { useEffect, useState, useRef, type ChangeEvent } from 'react';
 import {
-  Plus,
   Upload,
   Download,
   Eye,
   EyeOff,
   ChevronDown,
-  Undo2,
-  Redo2,
   Film,
-  Save,
-  Check,
   List,
   ListTree,
   SquareStack,
@@ -21,7 +16,6 @@ import {
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { cn } from '@/lib/utils';
 import { getLaneTitle, L1_HIDDEN_LANE_KEYS, L2_LANE_KEYS, L2_LANE_TITLE_OVERRIDES, L3_LANE_KEYS, L3_LANE_TITLE_OVERRIDES } from '@/lib/lane-definitions';
-import { useLibraryStore } from '@/store/library-store';
 import { exportBlueprintSpreadsheet, spreadsheetExportFilename } from '@/lib/export-spreadsheet';
 import {
   blueprintBackupExportFilename,
@@ -33,7 +27,7 @@ import {
   parseBlueprintBackupJson,
   parseStoryboardImagesZip,
 } from '@/lib/import-storyboard-images';
-import { parsePainPointFile } from '@/lib/pain-point-records';
+import { parseJiraIssueFile } from '@/lib/jira-issue-import';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
 import { activeUserJourney, userJourneyHeading } from '@/lib/user-journey';
 import type { Card, Opportunity } from '@/lib/types';
@@ -68,23 +62,14 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
-/** Compare serialized snapshots for library “dirty” checks; never throws (e.g. BigInt or circular refs). */
-function librarySnapshotsDiffer(a: unknown, b: unknown): boolean {
-  try {
-    return JSON.stringify(a) !== JSON.stringify(b);
-  } catch {
-    return true;
-  }
-}
-
 export function BoardToolbar({
   onImportSpreadsheet,
   appView = 'board',
   onAppViewChange,
 }: {
   onImportSpreadsheet?: () => void;
-  appView?: 'board' | 'pain_points';
-  onAppViewChange?: (view: 'board' | 'pain_points') => void;
+  appView?: 'board' | 'pain_points' | 'user_stories';
+  onAppViewChange?: (view: 'board' | 'pain_points' | 'user_stories') => void;
 } = {}) {
   const blueprint = useBlueprintStore((s) => s.blueprint);
   const rootDocument = useBlueprintStore((s) => s.rootDocument);
@@ -107,7 +92,6 @@ export function BoardToolbar({
   const evidence = useBlueprintStore((s) => s.evidence);
   const traceabilityCounters = useBlueprintStore((s) => s.traceabilityCounters);
   const setServiceName = useBlueprintStore((s) => s.setServiceName);
-  const addStage = useBlueprintStore((s) => s.addStage);
   const toggleLane = useBlueprintStore((s) => s.toggleLane);
   const toggleStoryboardVisible = useBlueprintStore((s) => s.toggleStoryboardVisible);
   const toggleStepHeadersVisible = useBlueprintStore((s) => s.toggleStepHeadersVisible);
@@ -136,22 +120,21 @@ export function BoardToolbar({
   const uiScaffolds = useBlueprintStore((s) => s.uiScaffolds);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
   const importStoryboardImages = useBlueprintStore((s) => s.importStoryboardImages);
-  const importPainPointRecords = useBlueprintStore((s) => s.importPainPointRecords);
+  const importJiraIssueMetadata = useBlueprintStore((s) => s.importJiraIssueMetadata);
   const readOnly = useBlueprintStore((s) => s.readOnly);
-
-  const entries = useLibraryStore((s) => s.entries);
-  const hydrateLibrary = useLibraryStore((s) => s.hydrate);
-  const saveToLibrary = useLibraryStore((s) => s.save);
 
   const isChildView = Boolean(rootDocument && activeBlueprintId !== rootBlueprintId);
   const activeJourney = activeUserJourney(userJourneys, activeUserJourneyId);
   const boardHeading =
     appView === 'pain_points'
       ? 'Pain points'
-      : activeJourney
-        ? userJourneyHeading(activeJourney)
-        : blueprintTitleLabel(blueprint.serviceName);
-  const headingIsReadOnly = readOnly || Boolean(activeJourney) || appView === 'pain_points';
+      : appView === 'user_stories'
+        ? 'User stories'
+        : activeJourney
+          ? userJourneyHeading(activeJourney)
+          : blueprintTitleLabel(blueprint.serviceName);
+  const headingIsReadOnly =
+    readOnly || Boolean(activeJourney) || appView === 'pain_points' || appView === 'user_stories';
   const isL2Mode = false;
   const isL3Mode = false;
   const useThreeLayerLayout = !isL2Mode && !isL3Mode;
@@ -171,18 +154,13 @@ export function BoardToolbar({
   const [showMenu, setShowMenu] = useState(false);
   const [transferDialog, setTransferDialog] = useState<'import' | 'export' | null>(null);
   const [transferNotice, setTransferNotice] = useState('');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const nameRef = useRef<HTMLInputElement>(null);
   const lanesTriggerRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const storyboardImportRef = useRef<HTMLInputElement>(null);
   const backupImportRef = useRef<HTMLInputElement>(null);
-  const painPointImportRef = useRef<HTMLInputElement>(null);
+  const jiraIssueImportRef = useRef<HTMLInputElement>(null);
 
-  const persistableDocument = useBlueprintStore.getState().getPersistableDocument();
-
-  const savedEntry = entries.find((e) => e.id === persistableDocument.blueprint.id);
-  const hasUnsavedLibraryChanges = !savedEntry || librarySnapshotsDiffer(savedEntry.state, persistableDocument);
   const contextualOpportunityCount = countContextualUserOpportunities(opportunities, cards);
 
   const saveName = () => {
@@ -288,29 +266,40 @@ export function BoardToolbar({
     }
   };
 
-  const handlePainPointImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleJiraIssueImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     setTransferNotice('');
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
     try {
-      const result = await parsePainPointFile(file);
+      const result = await parseJiraIssueFile(file);
       if (result.errors.length > 0) {
-        setTransferNotice(result.errors[0] ?? 'Could not import pain point details.');
+        setTransferNotice(result.errors[0] ?? 'Could not import Jira issue metadata.');
         return;
       }
       if (result.imported === 0) {
-        setTransferNotice('No pain point rows found in this file.');
+        setTransferNotice('No issue rows found in this file.');
         return;
       }
-      importPainPointRecords(result.records);
-      setTransferNotice(
-        `Imported ${result.imported} pain point record${result.imported === 1 ? '' : 's'}.`,
-      );
+      importJiraIssueMetadata(result);
+      const parts: string[] = [];
+      const painCount = Object.keys(result.painPointRecords).length;
+      const storyCount = Object.keys(result.userStoryRecords).length;
+      const otherCount = Object.keys(result.jiraIssueRecords).length;
+      if (painCount > 0) {
+        parts.push(`${painCount} pain point${painCount === 1 ? '' : 's'}`);
+      }
+      if (storyCount > 0) {
+        parts.push(`${storyCount} user stor${storyCount === 1 ? 'y' : 'ies'}`);
+      }
+      if (otherCount > 0) {
+        parts.push(`${otherCount} other issue${otherCount === 1 ? '' : 's'}`);
+      }
+      setTransferNotice(`Imported ${parts.join(', ')}.`);
       closeTransferDialog();
     } catch (err) {
-      setTransferNotice(err instanceof Error ? err.message : 'Could not import pain point details.');
+      setTransferNotice(err instanceof Error ? err.message : 'Could not import Jira issue metadata.');
     }
   };
 
@@ -318,21 +307,6 @@ export function BoardToolbar({
     closeTransferDialog();
     onImportSpreadsheet?.();
   };
-
-  const handleQuickSaveToLibrary = () => {
-    saveToLibrary(useBlueprintStore.getState().getPersistableDocument());
-    setSaveStatus('saved');
-  };
-
-  useEffect(() => {
-    hydrateLibrary();
-  }, [hydrateLibrary]);
-
-  useEffect(() => {
-    if (saveStatus !== 'saved') return;
-    const timeout = window.setTimeout(() => setSaveStatus('idle'), 2000);
-    return () => window.clearTimeout(timeout);
-  }, [saveStatus]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -411,6 +385,18 @@ export function BoardToolbar({
               >
                 Pain points
               </button>
+              <button
+                type="button"
+                onClick={() => onAppViewChange?.('user_stories')}
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400',
+                  appView === 'user_stories'
+                    ? 'bg-indigo-100 text-indigo-800'
+                    : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200',
+                )}
+              >
+                User stories
+              </button>
             </div>
             <h1 className="m-0 min-w-0 w-full text-xl font-bold leading-tight">
               {headingIsReadOnly ? (
@@ -452,52 +438,6 @@ export function BoardToolbar({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {!readOnly && (
-            <div className="mr-1 flex h-[34px] items-center rounded-lg border border-neutral-200 bg-white p-0 shadow-sm">
-              <button
-                onClick={undo}
-                disabled={!canUndo}
-                title="Undo (Cmd/Ctrl+Z)"
-                aria-label="Undo"
-                className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-l-lg text-neutral-600 transition-colors hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <Undo2 aria-hidden="true" className="h-4 w-4" />
-              </button>
-              <button
-                onClick={redo}
-                disabled={!canRedo}
-                title="Redo (Shift+Cmd/Ctrl+Z)"
-                aria-label="Redo"
-                className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-r-lg text-neutral-600 transition-colors hover:bg-neutral-50 disabled:text-neutral-300 disabled:hover:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <Redo2 aria-hidden="true" className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
-          {!readOnly && (hasUnsavedLibraryChanges || saveStatus === 'saved') && (
-            <button
-              onClick={handleQuickSaveToLibrary}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              {saveStatus === 'saved' ? (
-                <Check aria-hidden="true" className="h-3.5 w-3.5 text-emerald-600" />
-              ) : (
-                <Save aria-hidden="true" className="h-3.5 w-3.5" />
-              )}
-              {saveStatus === 'saved' ? 'Saved' : 'Save'}
-            </button>
-          )}
-
-          {!readOnly && (
-            <button
-              onClick={() => addStage((isL2Mode || isL3Mode) ? 'New step' : 'New stage')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <Plus aria-hidden="true" className="h-3.5 w-3.5" /> {(isL2Mode || isL3Mode) ? 'Step' : 'Stage'}
-            </button>
-          )}
-
           <div className="relative">
             <button
               ref={lanesTriggerRef}
@@ -717,7 +657,7 @@ export function BoardToolbar({
             <DialogTitle>{transferDialog === 'import' ? 'Import' : 'Export'}</DialogTitle>
             <DialogDescription>
               {transferDialog === 'import'
-                ? 'Bring storyboard images, a spreadsheet, pain point details, or a full backup into this blueprint.'
+                ? 'Bring storyboard images, master service details, Jira issue metadata, or a full backup into this blueprint.'
                 : 'Download storyboard images, a spreadsheet, or a full backup from this blueprint.'}
             </DialogDescription>
           </DialogHeader>
@@ -741,11 +681,11 @@ export function BoardToolbar({
             onChange={handleBackupImportFile}
           />
           <input
-            ref={painPointImportRef}
+            ref={jiraIssueImportRef}
             type="file"
             accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             className="hidden"
-            onChange={handlePainPointImportFile}
+            onChange={handleJiraIssueImportFile}
           />
           {transferDialog === 'import' ? (
             readOnly ? (
@@ -770,17 +710,17 @@ export function BoardToolbar({
                   disabled={!onImportSpreadsheet}
                   className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span className="text-sm font-semibold text-neutral-900">Spreadsheet</span>
+                  <span className="text-sm font-semibold text-neutral-900">Master service details</span>
                   <span className="text-xs leading-5 text-neutral-500">
                     Import stages, steps, lanes and card content from Excel or CSV.
                   </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => painPointImportRef.current?.click()}
+                  onClick={() => jiraIssueImportRef.current?.click()}
                   className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
-                  <span className="text-sm font-semibold text-neutral-900">Pain point details</span>
+                  <span className="text-sm font-semibold text-neutral-900">Jira issue metadata</span>
                   <span className="text-xs leading-5 text-neutral-500">
                     Import summary, status and description from a Jira CSV or Excel export.
                   </span>

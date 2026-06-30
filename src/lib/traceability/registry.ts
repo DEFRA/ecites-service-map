@@ -17,6 +17,7 @@ export const TRACEABILITY_PREFIXES = {
   user_action_event: 'UA',
   user_need: 'UN',
   pain_point: 'PP',
+  user_story: 'US',
   frontstage_touchpoint: 'FT',
   backstage_process: 'BP',
   description: 'DS',

@@ -30,6 +30,7 @@ import { getCardColorTokens } from './LaneLabel';
 import { cn } from '@/lib/utils';
 import { useFocusTrap } from '@/lib/hooks/useFocusTrap';
 import { PainPointCardDetail } from './PainPointCardDetail';
+import { UserStoryCardDetail } from './UserStoryCardDetail';
 import {
   getEvidenceCodesFromText,
   getTraceabilityCodesFromText,
@@ -606,6 +607,10 @@ export function CardDetailPanel() {
 
   if (card.laneKey === 'pain_point') {
     return <PainPointCardDetail card={card} onClose={handleClose} panelRef={panelRef} />;
+  }
+
+  if (card.laneKey === 'user_story') {
+    return <UserStoryCardDetail card={card} onClose={handleClose} panelRef={panelRef} />;
   }
 
   return (

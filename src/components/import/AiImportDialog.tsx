@@ -412,6 +412,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
   const [commitWarnings, setCommitWarnings] = useState<string[]>([]);
   const [committedCardCount, setCommittedCardCount] = useState(0);
   const [committedStageCount, setCommittedStageCount] = useState(0);
+  const [committedUserStoryCount, setCommittedUserStoryCount] = useState(0);
 
   // ── Reset ────────────────────────────────────────────────────────────────
 
@@ -430,6 +431,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
     setCommitWarnings([]);
     setCommittedCardCount(0);
     setCommittedStageCount(0);
+    setCommittedUserStoryCount(0);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -476,6 +478,9 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
             setServiceName(merged.blueprint.serviceName);
             setCommittedCardCount(merged.cards.length);
             setCommittedStageCount(merged.stages.length);
+            setCommittedUserStoryCount(
+              merged.cards.filter((card) => card.laneKey === 'user_story').length,
+            );
             replaceActiveBlueprint(merged);
             setStep('done');
           } catch (err) {
@@ -516,10 +521,18 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
             try {
               const csvText = XLSX.utils.sheet_to_csv(ws!);
               const current = useBlueprintStore.getState().getPersistableDocument();
-              const merged = applyCitesBlueprintImport(current, csvText, file.name);
+              const merged = applyCitesBlueprintImport(
+                current,
+                csvText,
+                file.name,
+                wb.SheetNames[0],
+              );
               setServiceName(merged.blueprint.serviceName);
               setCommittedCardCount(merged.cards.length);
               setCommittedStageCount(merged.stages.length);
+              setCommittedUserStoryCount(
+                merged.cards.filter((card) => card.laneKey === 'user_story').length,
+              );
               replaceActiveBlueprint(merged);
               setStep('done');
             } catch (err) {
@@ -576,10 +589,18 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
         try {
           const csvText = XLSX.utils.sheet_to_csv(ws!);
           const current = useBlueprintStore.getState().getPersistableDocument();
-          const merged = applyCitesBlueprintImport(current, csvText, fileName);
+          const merged = applyCitesBlueprintImport(
+            current,
+            csvText,
+            fileName,
+            workbook.SheetNames[0],
+          );
           setServiceName(merged.blueprint.serviceName);
           setCommittedCardCount(merged.cards.length);
           setCommittedStageCount(merged.stages.length);
+          setCommittedUserStoryCount(
+            merged.cards.filter((card) => card.laneKey === 'user_story').length,
+          );
           replaceActiveBlueprint(merged);
           setStep('done');
         } catch (err) {
@@ -931,9 +952,16 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
           <div className="flex flex-col items-center gap-3 px-6 py-8">
             <CheckCircle2 className="h-10 w-10 text-emerald-500" />
             <p className="text-[15px] font-semibold text-neutral-800">Blueprint imported</p>
-            <p className="text-[13px] text-neutral-500">
+            <p className="text-center text-[13px] text-neutral-500">
               {committedCardCount} card{committedCardCount !== 1 ? 's' : ''} across{' '}
               {committedStageCount} stage{committedStageCount !== 1 ? 's' : ''}
+              {committedUserStoryCount > 0 && (
+                <>
+                  <br />
+                  {committedUserStoryCount} user stor{committedUserStoryCount === 1 ? 'y' : 'ies'} on
+                  the blueprint
+                </>
+              )}
             </p>
             {commitWarnings.length > 0 && (
               <div className="mt-1 w-full rounded-lg border border-amber-200 bg-amber-50 p-3">

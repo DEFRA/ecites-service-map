@@ -1,9 +1,49 @@
-import { describe, expect, it } from 'vitest';
-import { L2_LANE_KEYS, L3_LANE_KEYS } from '@/lib/lane-definitions';
+import { describe, it, expect } from 'vitest';
+import { DEFAULT_LANES, mergeLaneDefinitions } from '../lane-definitions';
+import type { Card } from '../types';
 
-describe('lane definitions', () => {
-  it('shows opportunities and ideas at the bottom of L2 and L3', () => {
-    expect(L2_LANE_KEYS.slice(-2)).toEqual(['opportunities', 'ideas']);
-    expect(L3_LANE_KEYS.slice(-2)).toEqual(['opportunities', 'ideas']);
+describe('mergeLaneDefinitions', () => {
+  it('adds user_story to older blueprints that only saved the original lanes', () => {
+    const legacyLanes = DEFAULT_LANES.filter((lane) => lane.key !== 'user_story').map((lane) => ({
+      ...lane,
+    }));
+
+    const merged = mergeLaneDefinitions(legacyLanes, DEFAULT_LANES, []);
+    const userStoryLane = merged.find((lane) => lane.key === 'user_story');
+
+    expect(userStoryLane).toBeDefined();
+    expect(userStoryLane?.visible).toBe(true);
+    expect(userStoryLane?.title).toBe('User story');
+  });
+
+  it('turns visibility on when user story cards exist', () => {
+    const legacyLanes = DEFAULT_LANES.map((lane) => ({
+      ...lane,
+      visible: lane.key === 'user_story' ? false : lane.visible,
+    }));
+
+    const cards: Card[] = [
+      {
+        id: 'us1',
+        blueprintId: 'bp',
+        stageId: 'st',
+        stepId: 'step',
+        subStepId: 'sub',
+        laneKey: 'user_story',
+        title: 'CTS-165',
+        body: '',
+        order: 0,
+        tags: [],
+        sourceFile: '',
+        sourceSheet: '',
+        sourceRow: null,
+        sourceRef: '',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    const merged = mergeLaneDefinitions(legacyLanes, DEFAULT_LANES, cards);
+    expect(merged.find((lane) => lane.key === 'user_story')?.visible).toBe(true);
   });
 });

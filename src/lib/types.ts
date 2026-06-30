@@ -137,9 +137,25 @@ export interface PainPointRecord {
   status: string;
   description: string;
   issueType?: string;
+  labels?: string;
   parentKey?: string;
   parentSummary?: string;
 }
+
+/** Metadata imported from a Jira user story export, keyed by issue key (e.g. CTS-165). */
+export interface UserStoryRecord {
+  issueKey: string;
+  summary: string;
+  status: string;
+  description: string;
+  issueType?: string;
+  labels?: string;
+  parentKey?: string;
+  parentSummary?: string;
+}
+
+/** Metadata imported from a Jira export for any issue type, keyed by issue key. */
+export type JiraIssueRecord = PainPointRecord;
 
 export const LANE_KEYS = [
   // L2 Micro lanes
@@ -147,6 +163,7 @@ export const LANE_KEYS = [
   'user_action_event',
   'user_need',
   'pain_point',
+  'user_story',
   'frontstage_touchpoint',
   'activity',
   'backstage_process',
@@ -466,6 +483,8 @@ export interface BlueprintState {
   systemJourneyFilter?: string | null;
   userNeedJourneyFilter?: string | null;
   painPointJourneyFilter?: string | null;
+  /** Filter visible sub-step columns to those with a matching user story status (null = all). */
+  userStoryJourneyFilter?: string | null;
   /** User journeys parsed from the spreadsheet JOURNEYS section. */
   userJourneys?: UserJourney[];
   /** When set, the board shows only columns in this user journey. */
@@ -474,6 +493,10 @@ export interface BlueprintState {
   descriptionVisibleInUserJourney?: boolean;
   /** Jira pain point metadata keyed by issue key (e.g. CTS-95). */
   painPointRecords?: Record<string, PainPointRecord>;
+  /** Jira user story metadata keyed by issue key (e.g. CTS-165). */
+  userStoryRecords?: Record<string, UserStoryRecord>;
+  /** Jira metadata for other issue types (e.g. User Need), keyed by issue key. */
+  jiraIssueRecords?: Record<string, JiraIssueRecord>;
   cardLinks: CardLink[];
   evidence: Evidence[];
   opportunities: Opportunity[];

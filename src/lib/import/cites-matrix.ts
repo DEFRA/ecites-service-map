@@ -20,7 +20,7 @@ import type {
   SubStep,
   UserJourney,
 } from '../types';
-import { DEFAULT_LANES } from '../lane-definitions';
+import { DEFAULT_LANES, mergeLaneDefinitions } from '../lane-definitions';
 import { validateLaneKey } from './validate';
 import { CITES_BLUEPRINT_CSV } from './cites-blueprint-csv';
 import { relinkOrphanedStoryboardImages, remapStoryboardImages } from '../storyboard-images';
@@ -77,6 +77,8 @@ const LANE_ALIASES: Record<string, LaneKey> = {
   user_tasks: 'activity',
   tasks: 'activity',
   pain_points: 'pain_point',
+  user_stories: 'user_story',
+  user_story: 'user_story',
   systems: 'system',
 };
 
@@ -115,6 +117,7 @@ function emptyImportState(bpId: string, ts: string, serviceName: string): Bluepr
     systemJourneyFilter: null,
     userNeedJourneyFilter: null,
     painPointJourneyFilter: null,
+    userStoryJourneyFilter: null,
     userJourneys: [],
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
@@ -159,8 +162,12 @@ function resolveLaneKey(label: string): LaneKey | null {
   return null;
 }
 
-function deriveServiceName(fileName: string): string {
-  const base = fileName.replace(/\.[^.]+$/, '').trim();
+/** Blueprint title from the first worksheet tab name, else the file name. */
+export function deriveServiceName(sourceFile: string, sourceSheet?: string): string {
+  const sheet = sourceSheet?.trim();
+  if (sheet) return sheet;
+
+  const base = sourceFile.replace(/\.[^.]+$/, '').trim();
   if (/cites/i.test(base)) return 'CITES';
   return base || 'Enter title';
 }
@@ -292,7 +299,7 @@ export function normalizeCitesBlueprintMatrix(
       field: 'format',
       message: 'CITES matrix requires STAGES, STEPS and SUB-STEPS rows in column A',
     });
-    return { state: emptyImportState(bpId, ts, deriveServiceName(sourceFile)), errors, warnings };
+    return { state: emptyImportState(bpId, ts, deriveServiceName(sourceFile, sourceSheet)), errors, warnings };
   }
 
   const colCount = Math.max(
@@ -302,7 +309,7 @@ export function normalizeCitesBlueprintMatrix(
   );
   if (colCount < 1) {
     errors.push({ row: 0, field: 'columns', message: 'No data columns found after row labels' });
-    return { state: emptyImportState(bpId, ts, deriveServiceName(sourceFile)), errors, warnings };
+    return { state: emptyImportState(bpId, ts, deriveServiceName(sourceFile, sourceSheet)), errors, warnings };
   }
 
   const sliceCols = (row: string[]) => row.slice(1, 1 + colCount).map((c) => String(c ?? '').trim());
@@ -540,7 +547,7 @@ export function normalizeCitesBlueprintMatrix(
     if (k.startsWith('SRC_')) finalSrcCounters[k] = v;
   }
 
-  const state = emptyImportState(bpId, ts, deriveServiceName(sourceFile));
+  const state = emptyImportState(bpId, ts, deriveServiceName(sourceFile, sourceSheet));
   state.stages = stages;
   state.steps = steps;
   state.subSteps = subSteps;
@@ -565,9 +572,14 @@ export function applyCitesBlueprintImport(
   current: BlueprintState,
   csvText: string,
   sourceFile = 'cites-service-blueprint.csv',
+  sourceSheet?: string,
 ): BlueprintState {
   const raw = parseCitesBlueprintRaw(csvText);
-  const { state: imported, errors } = normalizeCitesBlueprintMatrix(raw, sourceFile, 'Sheet1');
+  const { state: imported, errors } = normalizeCitesBlueprintMatrix(
+    raw,
+    sourceFile,
+    sourceSheet ?? 'Sheet1',
+  );
   if (errors.length > 0) {
     throw new Error(errors.map((e) => e.message).join('; '));
   }
@@ -598,7 +610,10 @@ export function applyCitesBlueprintImport(
     blueprint: {
       ...imported.blueprint,
       id: current.blueprint.id,
-      serviceName: current.blueprint.serviceName?.trim() || imported.blueprint.serviceName,
+      serviceName:
+        imported.blueprint.serviceName?.trim() ||
+        current.blueprint.serviceName?.trim() ||
+        'Enter title',
       description: current.blueprint.description,
       publishedShareId: current.blueprint.publishedShareId,
       createdAt: current.blueprint.createdAt,
@@ -609,6 +624,9 @@ export function applyCitesBlueprintImport(
     childBlueprints: current.childBlueprints ?? [],
     storyboardImages,
     painPointRecords: { ...(current.painPointRecords ?? {}) },
+    userStoryRecords: { ...(current.userStoryRecords ?? {}) },
+    jiraIssueRecords: { ...(current.jiraIssueRecords ?? {}) },
+    lanes: mergeLaneDefinitions(current.lanes ?? [], imported.lanes, imported.cards),
     traceabilityCounters: {
       ...(current.traceabilityCounters ?? {}),
       ...(imported.traceabilityCounters ?? {}),

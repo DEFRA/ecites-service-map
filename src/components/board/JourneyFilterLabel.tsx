@@ -1,10 +1,11 @@
 'use client';
 
-import { User, Database, Heart, AlertTriangle, ChevronDown, Check } from 'lucide-react';
+import { User, Database, Heart, AlertTriangle, BookOpen, ChevronDown, Check } from 'lucide-react';
 import { type LaneDefinition, type LaneKey } from '@/lib/types';
 import { getLaneTitle } from '@/lib/lane-definitions';
 import { type JourneyFilterLaneKey, isJourneyFilterLane } from '@/lib/journey-lane-filter';
 import { painPointStatusPillClass } from '@/lib/pain-point-records';
+import { userStoryStatusPillClass } from '@/lib/user-story-records';
 import { LANE_COLOR_TOKENS } from '@/components/board/LaneLabel';
 import {
   DropdownMenu,
@@ -19,6 +20,7 @@ const ICON_MAP: Record<JourneyFilterLaneKey, React.ElementType> = {
   system: Database,
   user_need: Heart,
   pain_point: AlertTriangle,
+  user_story: BookOpen,
 };
 
 const ALL_LABEL: Record<JourneyFilterLaneKey, string> = {
@@ -26,6 +28,7 @@ const ALL_LABEL: Record<JourneyFilterLaneKey, string> = {
   system: 'All systems',
   user_need: 'All user needs',
   pain_point: 'All statuses',
+  user_story: 'All statuses',
 };
 
 const FOCUS_RING: Record<JourneyFilterLaneKey, string> = {
@@ -33,6 +36,7 @@ const FOCUS_RING: Record<JourneyFilterLaneKey, string> = {
   system: 'focus-visible:ring-cyan-400',
   user_need: 'focus-visible:ring-amber-400',
   pain_point: 'focus-visible:ring-rose-400',
+  user_story: 'focus-visible:ring-indigo-400',
 };
 
 const FILTER_PILL_NEUTRAL =
@@ -41,6 +45,9 @@ const FILTER_PILL_NEUTRAL =
 function filterSelectionPillClass(laneKey: JourneyFilterLaneKey, value: string): string {
   if (laneKey === 'pain_point') {
     return painPointStatusPillClass(value);
+  }
+  if (laneKey === 'user_story') {
+    return userStoryStatusPillClass(value);
   }
   return FILTER_PILL_NEUTRAL;
 }

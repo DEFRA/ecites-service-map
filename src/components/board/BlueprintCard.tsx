@@ -15,6 +15,11 @@ import {
   formatPainPointHeading,
   painPointStatusPillClass,
 } from '@/lib/pain-point-records';
+import {
+  extractUserStoryIssueKey,
+  formatUserStoryHeading,
+  userStoryStatusPillClass,
+} from '@/lib/user-story-records';
 
 interface BlueprintCardProps {
   card: Card;
@@ -29,6 +34,7 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
   const selectedCardId = useBlueprintStore((s) => s.selectedCardId);
   const readOnly = useBlueprintStore((s) => s.readOnly);
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
+  const userStoryRecords = useBlueprintStore((s) => s.userStoryRecords ?? {});
   const isSelected = selectedCardId === card.id;
 
   const [editing, setEditing] = useState(false);
@@ -141,12 +147,16 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
 
   const laneToken = getCardColorTokens(card.laneKey, card.tags);
   const baseTitle = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.title));
-  const issueKey = card.laneKey === 'pain_point' ? extractPainPointIssueKey(card) : null;
-  const painRecord = issueKey ? painPointRecords[issueKey] : undefined;
+  const painIssueKey = card.laneKey === 'pain_point' ? extractPainPointIssueKey(card) : null;
+  const storyIssueKey = card.laneKey === 'user_story' ? extractUserStoryIssueKey(card) : null;
+  const painRecord = painIssueKey ? painPointRecords[painIssueKey] : undefined;
+  const storyRecord = storyIssueKey ? userStoryRecords[storyIssueKey] : undefined;
   const displayTitle =
-    card.laneKey === 'pain_point' && issueKey
-      ? formatPainPointHeading(issueKey, painRecord?.summary, baseTitle)
-      : baseTitle;
+    card.laneKey === 'pain_point' && painIssueKey
+      ? formatPainPointHeading(painIssueKey, painRecord?.summary, baseTitle)
+      : card.laneKey === 'user_story' && storyIssueKey
+        ? formatUserStoryHeading(storyIssueKey, storyRecord?.summary, baseTitle)
+        : baseTitle;
   const displayBody = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.body));
 
   return (
@@ -161,7 +171,7 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
       }}
       className={cn(
         'group relative rounded-lg border px-2 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]',
-        card.laneKey === 'pain_point' ? 'bg-white' : laneToken.bg,
+        card.laneKey === 'pain_point' || card.laneKey === 'user_story' ? 'bg-white' : laneToken.bg,
         laneToken.border,
         isSelected && 'ring-2 ring-blue-400 ring-offset-1',
         isDragOverlay && 'rotate-1 shadow-lg',
@@ -178,6 +188,16 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
               )}
             >
               {painRecord.status}
+            </div>
+          )}
+          {card.laneKey === 'user_story' && storyRecord?.status && (
+            <div
+              className={cn(
+                'mt-1 w-full rounded-md border px-2 py-0.5 text-[10px] font-semibold leading-snug',
+                userStoryStatusPillClass(storyRecord.status),
+              )}
+            >
+              {storyRecord.status}
             </div>
           )}
           {displayBody && (

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   collectJourneyLaneTypes,
   collectPainPointStatuses,
+  collectUserStoryStatuses,
   displayJourneyLaneCards,
   subStepIdsForLaneFilter,
   visibleSubStepIdsForJourneyFilters,
@@ -222,9 +223,66 @@ describe('journey lane filter — user need and pain point', () => {
       cards,
       { user_need: 'Need clarity', pain_point: 'Forms unclear' },
       layout,
-      records,
+      { painPointRecords: records },
     );
     expect(ids).toEqual(new Set());
+  });
+
+  it('collects user story statuses in workflow order', () => {
+    const cards: Card[] = [
+      makeCard({ id: 'us1', laneKey: 'user_story', title: 'CTS-165', subStepId: 'sub1' }),
+      makeCard({ id: 'us2', laneKey: 'user_story', title: 'CTS-103', subStepId: 'sub2' }),
+    ];
+    const records = {
+      'CTS-165': {
+        issueKey: 'CTS-165',
+        summary: 'Done story',
+        status: 'Done',
+        description: '',
+      },
+      'CTS-103': {
+        issueKey: 'CTS-103',
+        summary: 'Active story',
+        status: 'In Progress',
+        description: '',
+      },
+    };
+
+    expect(collectUserStoryStatuses(cards, records)).toEqual(['Done', 'In Progress']);
+  });
+
+  it('filters user story cards by status', () => {
+    const cards: Card[] = [
+      makeCard({ id: 'us1', laneKey: 'user_story', title: 'CTS-165', subStepId: 'sub1' }),
+      makeCard({ id: 'us2', laneKey: 'user_story', title: 'CTS-103', subStepId: 'sub1', order: 1 }),
+    ];
+    const records = {
+      'CTS-165': {
+        issueKey: 'CTS-165',
+        summary: 'Done',
+        status: 'Done',
+        description: '',
+      },
+      'CTS-103': {
+        issueKey: 'CTS-103',
+        summary: 'Active',
+        status: 'In Progress',
+        description: '',
+      },
+    };
+
+    expect(
+      displayJourneyLaneCards(cards, 'In Progress', {
+        laneKey: 'user_story',
+        userStoryRecords: records,
+      }),
+    ).toHaveLength(1);
+    expect(
+      displayJourneyLaneCards(cards, 'In Progress', {
+        laneKey: 'user_story',
+        userStoryRecords: records,
+      })[0]?.title,
+    ).toBe('CTS-103');
   });
 
   it('dedupes and filters user need cards for display', () => {

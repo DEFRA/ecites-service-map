@@ -1,4 +1,4 @@
-import type { Card, LaneKey, PainPointRecord } from './types';
+import type { Card, LaneKey, PainPointRecord, UserStoryRecord } from './types';
 import type { L1BoardLayout } from './board-columns';
 import {
   extractPainPointIssueKey,
@@ -6,9 +6,20 @@ import {
   PAIN_POINT_STATUS_ORDER,
   sortPainPointCardsByStatus,
 } from './pain-point-records';
+import {
+  extractUserStoryIssueKey,
+  sortUserStoryCardsByStatus,
+  userStoryStatusSortIndex,
+} from './user-story-records';
 
 /** Lanes with per-column cards, deduplication, journey filter dropdown, and column filtering. */
-export const JOURNEY_FILTER_LANE_KEYS = ['actor', 'system', 'user_need', 'pain_point'] as const;
+export const JOURNEY_FILTER_LANE_KEYS = [
+  'actor',
+  'system',
+  'user_need',
+  'pain_point',
+  'user_story',
+] as const;
 
 export type JourneyFilterLaneKey = (typeof JOURNEY_FILTER_LANE_KEYS)[number];
 
@@ -16,9 +27,13 @@ export function isJourneyFilterLane(laneKey: LaneKey): laneKey is JourneyFilterL
   return (JOURNEY_FILTER_LANE_KEYS as readonly string[]).includes(laneKey);
 }
 
-export interface JourneyLaneFilterOptions {
-  laneKey?: LaneKey;
+export interface JourneyFilterRecords {
   painPointRecords?: Record<string, PainPointRecord>;
+  userStoryRecords?: Record<string, UserStoryRecord>;
+}
+
+export interface JourneyLaneFilterOptions extends JourneyFilterRecords {
+  laneKey?: LaneKey;
 }
 
 function painPointStatusForCard(
@@ -31,6 +46,16 @@ function painPointStatusForCard(
   return status || null;
 }
 
+function userStoryStatusForCard(
+  card: Card,
+  records: Record<string, UserStoryRecord>,
+): string | null {
+  const issueKey = extractUserStoryIssueKey(card);
+  if (!issueKey) return null;
+  const status = records[issueKey]?.status?.trim();
+  return status || null;
+}
+
 function cardMatchesJourneyFilter(
   card: Card,
   target: string,
@@ -38,6 +63,9 @@ function cardMatchesJourneyFilter(
 ): boolean {
   if (options?.laneKey === 'pain_point' && options.painPointRecords) {
     return painPointStatusForCard(card, options.painPointRecords) === target;
+  }
+  if (options?.laneKey === 'user_story' && options.userStoryRecords) {
+    return userStoryStatusForCard(card, options.userStoryRecords) === target;
   }
   return card.title.trim() === target;
 }
@@ -68,9 +96,27 @@ export function collectPainPointStatuses(
   });
 }
 
-/** Dedupe key for a card in a column (pain points and user needs dedupe by code when present). */
+/** Distinct user story statuses on the board, in workflow order. */
+export function collectUserStoryStatuses(
+  cards: Card[],
+  records: Record<string, UserStoryRecord>,
+): string[] {
+  const seen = new Set<string>();
+  for (const card of cards) {
+    if (card.laneKey !== 'user_story') continue;
+    const status = userStoryStatusForCard(card, records);
+    if (status) seen.add(status);
+  }
+
+  return [...seen].sort((a, b) => {
+    const byWorkflow = userStoryStatusSortIndex(b) - userStoryStatusSortIndex(a);
+    return byWorkflow !== 0 ? byWorkflow : a.localeCompare(b);
+  });
+}
+
+/** Dedupe key for a card in a column (coded lanes dedupe by code when present). */
 function dedupeKeyForCard(card: Card): string {
-  if (card.laneKey === 'pain_point' || card.laneKey === 'user_need') {
+  if (card.laneKey === 'pain_point' || card.laneKey === 'user_need' || card.laneKey === 'user_story') {
     const code = card.traceabilityCode?.trim();
     if (code) return code.toLowerCase();
   }
@@ -168,6 +214,9 @@ export function displayJourneyLaneCards(
   if (options?.laneKey === 'pain_point' && options.painPointRecords) {
     return sortPainPointCardsByStatus(filtered, options.painPointRecords);
   }
+  if (options?.laneKey === 'user_story' && options.userStoryRecords) {
+    return sortUserStoryCardsByStatus(filtered, options.userStoryRecords);
+  }
   return filtered;
 }
 
@@ -196,6 +245,7 @@ export function subStepIdsForLaneFilter(
   const laneOptions: JourneyLaneFilterOptions = {
     laneKey,
     painPointRecords: options?.painPointRecords,
+    userStoryRecords: options?.userStoryRecords,
   };
   for (const card of cards) {
     if (card.laneKey !== laneKey) continue;
@@ -226,7 +276,7 @@ export function visibleSubStepIdsForJourneyFilters(
   cards: Card[],
   filters: Partial<Record<JourneyFilterLaneKey, string | null>>,
   layout: L1BoardLayout | null = null,
-  painPointRecords?: Record<string, PainPointRecord>,
+  records?: JourneyFilterRecords,
 ): Set<string> | null {
   const sets: Set<string>[] = [];
   for (const laneKey of JOURNEY_FILTER_LANE_KEYS) {
@@ -235,7 +285,8 @@ export function visibleSubStepIdsForJourneyFilters(
       sets.push(
         subStepIdsForLaneFilter(cards, laneKey, filter, layout, {
           laneKey,
-          painPointRecords,
+          painPointRecords: records?.painPointRecords,
+          userStoryRecords: records?.userStoryRecords,
         }),
       );
     }

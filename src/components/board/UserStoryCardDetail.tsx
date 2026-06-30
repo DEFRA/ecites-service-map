@@ -5,18 +5,20 @@ import { X } from 'lucide-react';
 import { type Card } from '@/lib/types';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import {
-  extractPainPointIssueKey,
+  extractUserStoryIssueKey,
+  formatUserStoryHeading,
+  userStoryStatusPillClass,
+} from '@/lib/user-story-records';
+import {
   formatJiraWikiDescription,
-  formatPainPointHeading,
   parseJiraWikiBoldSegments,
-  painPointStatusPillClass,
 } from '@/lib/pain-point-records';
 import { resolveJiraIssueRecord } from '@/lib/jira-issue-import';
 import { getLaneTitle } from '@/lib/lane-definitions';
 import { getCardColorTokens } from './LaneLabel';
 import { cn } from '@/lib/utils';
 
-function PainPointBreadcrumb({ card }: { card: Card }) {
+function UserStoryBreadcrumb({ card }: { card: Card }) {
   const stages = useBlueprintStore((s) => s.stages);
   const steps = useBlueprintStore((s) => s.steps);
   const subSteps = useBlueprintStore((s) => s.subSteps ?? []);
@@ -93,28 +95,28 @@ function JiraWikiDescription({ text }: { text: string }) {
   );
 }
 
-interface PainPointCardDetailProps {
+interface UserStoryCardDetailProps {
   card?: Card | null;
   issueKey?: string | null;
   onClose: () => void;
   panelRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function PainPointCardDetail({ card, issueKey, onClose, panelRef }: PainPointCardDetailProps) {
+export function UserStoryCardDetail({ card, issueKey, onClose, panelRef }: UserStoryCardDetailProps) {
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
   const userStoryRecords = useBlueprintStore((s) => s.userStoryRecords ?? {});
   const jiraIssueRecords = useBlueprintStore((s) => s.jiraIssueRecords ?? {});
 
-  const resolvedIssueKey = issueKey?.trim() || (card ? extractPainPointIssueKey(card) : null);
+  const resolvedIssueKey = issueKey?.trim() || (card ? extractUserStoryIssueKey(card) : null);
   const record = resolvedIssueKey
     ? resolveJiraIssueRecord(resolvedIssueKey, { painPointRecords, userStoryRecords, jiraIssueRecords })
     : undefined;
-  const heading = formatPainPointHeading(
+  const heading = formatUserStoryHeading(
     resolvedIssueKey,
     record?.summary,
     resolvedIssueKey
-      ? 'Import pain point details to see the summary.'
-      : card?.title ?? 'Pain point',
+      ? 'Import Jira issue metadata to see the summary.'
+      : card?.title ?? 'User story',
   );
 
   useEffect(() => {
@@ -141,7 +143,7 @@ export function PainPointCardDetail({ card, issueKey, onClose, panelRef }: PainP
         >
           <X aria-hidden="true" className="h-4 w-4" />
         </button>
-        {card ? <PainPointBreadcrumb card={card} /> : null}
+        {card ? <UserStoryBreadcrumb card={card} /> : null}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -155,7 +157,7 @@ export function PainPointCardDetail({ card, issueKey, onClose, panelRef }: PainP
                 <span
                   className={cn(
                     'inline-flex max-w-full items-center rounded-full border px-3 py-1 text-[12px] font-semibold leading-snug',
-                    painPointStatusPillClass(record.status),
+                    userStoryStatusPillClass(record.status),
                   )}
                 >
                   {record.status}

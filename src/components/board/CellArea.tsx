@@ -14,6 +14,7 @@ const HIDDEN_BADGE_NOUN: Partial<Record<JourneyFilterLaneKey, string>> = {
   system: 'system',
   user_need: 'user need',
   pain_point: 'pain point',
+  user_story: 'user story',
 };
 
 interface CellAreaProps {

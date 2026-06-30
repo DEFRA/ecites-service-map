@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   applyCitesBlueprintImport,
+  deriveServiceName,
   detectCitesBlueprintMatrix,
   fillMergedRow,
   needsCitesCsvRefresh,
@@ -13,6 +14,16 @@ import {
 import { buildEcitesLifecycleEntities } from '../../ecites-lifecycle-data';
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'cites-service-blueprint.csv');
+
+describe('deriveServiceName', () => {
+  it('uses the first worksheet tab name when provided', () => {
+    expect(deriveServiceName('export.xlsx', 'Falcon export')).toBe('Falcon export');
+  });
+
+  it('falls back to the file name when no sheet name is provided', () => {
+    expect(deriveServiceName('my-service-map.xlsx')).toBe('my-service-map');
+  });
+});
 
 describe('fillMergedRow', () => {
   it('carries the last non-empty value across blanks', () => {
@@ -29,10 +40,14 @@ describe('CITES service blueprint matrix', () => {
   });
 
   it('imports stages, merged steps, sub-steps and actors', () => {
-    const { state, errors } = normalizeCitesBlueprintMatrix(raw, 'CITES Service blueprint - Sheet1.csv', 'Sheet1');
+    const { state, errors } = normalizeCitesBlueprintMatrix(
+      raw,
+      'CITES Service blueprint - Sheet1.csv',
+      'eCITES blueprint',
+    );
     expect(errors).toEqual([]);
 
-    expect(state.blueprint.serviceName).toBe('CITES');
+    expect(state.blueprint.serviceName).toBe('eCITES blueprint');
     expect(state.stages.map((s) => s.title)).toEqual([
       'Aware',
       'Prepare',
@@ -160,9 +175,67 @@ describe('CITES service blueprint matrix', () => {
       },
     } as import('@/lib/types').BlueprintState;
 
-    const merged = applyCitesBlueprintImport(current, text, 'cites.csv');
+    const merged = applyCitesBlueprintImport(current, text, 'cites.csv', 'eCITES blueprint');
+    expect(merged.blueprint.serviceName).toBe('eCITES blueprint');
     expect(merged.painPointRecords?.['CTS-95']?.summary).toBe('Permit guidance is unclear');
     expect(merged.cards.length).toBeGreaterThan(0);
+  });
+
+  it('imports user story cards from the CITES master spreadsheet', () => {
+    const masterPath = '/Users/jackiebrownlee/Downloads/CITES Master service blueprint - CITES service blueprint-2.csv';
+    if (!fs.existsSync(masterPath)) return;
+
+    const masterText = fs.readFileSync(masterPath, 'utf8');
+    const raw = parseCitesBlueprintRaw(masterText);
+    const { state, errors } = normalizeCitesBlueprintMatrix(raw, 'CITES master.csv', 'Sheet1');
+    expect(errors).toEqual([]);
+
+    const storyCards = state.cards.filter((c) => c.laneKey === 'user_story');
+    expect(storyCards.length).toBeGreaterThan(40);
+    expect(storyCards.some((c) => c.title.includes('CTS-165'))).toBe(true);
+  });
+
+  it('imports user story cards from a User stories row', () => {
+    const matrix = `STAGES,Prepare
+STEPS,System access
+SUB-STEPS,System access for Applicants
+Actors,Applicant
+User stories,CTS-165 CTS-103`;
+    const raw = parseCitesBlueprintRaw(matrix);
+    const { state, errors } = normalizeCitesBlueprintMatrix(raw, 'stories.csv', 'Sheet1');
+    expect(errors).toEqual([]);
+    const storyCards = state.cards.filter((c) => c.laneKey === 'user_story');
+    expect(storyCards.map((c) => c.title)).toEqual(expect.arrayContaining(['CTS-165', 'CTS-103']));
+  });
+
+  it('keeps Jira user story details when re-importing the service map spreadsheet', () => {
+    const current = {
+      blueprint: {
+        id: 'bp-1',
+        serviceName: 'eCITES blueprint',
+        description: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      stages: [],
+      steps: [],
+      subSteps: [],
+      lanes: [],
+      childBlueprints: [],
+      cards: [],
+      storyboardImages: [],
+      userStoryRecords: {
+        'CTS-165': {
+          issueKey: 'CTS-165',
+          summary: 'View permit details',
+          status: 'Done',
+          description: '',
+        },
+      },
+    } as import('@/lib/types').BlueprintState;
+
+    const merged = applyCitesBlueprintImport(current, text, 'cites.csv');
+    expect(merged.userStoryRecords?.['CTS-165']?.summary).toBe('View permit details');
   });
 
   it('repairs a stale eCITES stub on refresh', () => {

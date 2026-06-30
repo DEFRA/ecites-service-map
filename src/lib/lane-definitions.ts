@@ -6,6 +6,7 @@ export const DEFAULT_LANES: LaneDefinition[] = [
   { key: 'system', title: 'Systems', order: 1, visible: true, collapsed: false },
   { key: 'user_need', title: 'User need', order: 2, visible: true, collapsed: false },
   { key: 'pain_point', title: 'Pain point', order: 3, visible: true, collapsed: false },
+  { key: 'user_story', title: 'User story', order: 4, visible: true, collapsed: false },
 ];
 
 /**
@@ -110,6 +111,7 @@ export const LANE_TITLE_MAP = {
   ),
   // Retired lifecycle lanes (legacy cards and imports)
   user_action_event: 'User action',
+  user_story: 'User stories',
   frontstage_touchpoint: 'Frontstage touchpoint',
   activity: 'Activity',
   backstage_process: 'Backstage process',
@@ -134,11 +136,58 @@ export function getLaneTitle(key: LaneDefinition['key']): string {
   return LANE_TITLE_MAP[key];
 }
 
+/**
+ * Merge saved lane toggles with the canonical default list.
+ * Ensures new lanes (e.g. user_story) appear on older blueprints and turns
+ * visibility on when cards exist in that lane.
+ */
+export function mergeLaneDefinitions(
+  existing: LaneDefinition[],
+  defaults: LaneDefinition[],
+  cards: { laneKey: LaneDefinition['key'] }[] = [],
+  options?: { forceVisibleLaneKeys?: LaneDefinition['key'][] },
+): LaneDefinition[] {
+  const byKey = new Map(existing.map((lane) => [lane.key, lane]));
+  const cardLaneKeys = new Set(cards.map((card) => card.laneKey));
+  const forceVisible = new Set(options?.forceVisibleLaneKeys ?? []);
+
+  const merged = defaults.map((defaultLane) => {
+    const existingLane = byKey.get(defaultLane.key);
+    const hasCards = cardLaneKeys.has(defaultLane.key);
+    const forceShow = forceVisible.has(defaultLane.key);
+    return {
+      ...defaultLane,
+      ...existingLane,
+      title: defaultLane.title,
+      order: defaultLane.order,
+      visible: hasCards || forceShow ? true : (existingLane?.visible ?? defaultLane.visible),
+      collapsed: existingLane?.collapsed ?? defaultLane.collapsed,
+    };
+  });
+
+  for (const laneKey of cardLaneKeys) {
+    if (merged.some((lane) => lane.key === laneKey)) continue;
+    const title = LANE_TITLE_MAP[laneKey];
+    if (!title) continue;
+    const existingLane = byKey.get(laneKey);
+    merged.push({
+      key: laneKey,
+      title,
+      order: merged.length,
+      visible: true,
+      collapsed: existingLane?.collapsed ?? false,
+    });
+  }
+
+  return merged.sort((a, b) => a.order - b.order);
+}
+
 export const LANE_ICON_MAP: Record<string, string> = {
   actor: 'User',
   user_action_event: 'MousePointerClick',
   user_need: 'Heart',
   pain_point: 'AlertTriangle',
+  user_story: 'BookOpen',
   frontstage_touchpoint: 'Monitor',
   activity: 'ListChecks',
   backstage_process: 'Settings',
