@@ -11,13 +11,4 @@ This code is automatically posted into CDP so it can be used by stakeholders htt
 Find out more here: https://eaflood.atlassian.net/wiki/spaces/ECITES/pages/6536004440/Master+service+blueprint
 
 
-## Getting started
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
 
