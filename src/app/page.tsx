@@ -82,7 +82,7 @@ export default function Home() {
         onAppViewChange={setAppView}
       />
       {stages.length === 0 ? (
-        <EmptyState onImport={() => setShowImport(true)} />
+        <EmptyState onImportSpreadsheet={() => setShowImport(true)} />
       ) : appView === 'pain_points' ? (
         <PainPointsPage />
       ) : appView === 'user_stories' ? (

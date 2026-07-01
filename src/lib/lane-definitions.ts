@@ -4,9 +4,9 @@ export const DEFAULT_LANES: LaneDefinition[] = [
   { key: 'sub_sub_step', title: 'Sub-sub-steps', order: -1, visible: true, collapsed: false },
   { key: 'actor', title: 'Actor', order: 0, visible: true, collapsed: false },
   { key: 'system', title: 'Systems', order: 1, visible: true, collapsed: false },
-  { key: 'user_need', title: 'User need', order: 2, visible: true, collapsed: false },
-  { key: 'pain_point', title: 'Pain point', order: 3, visible: true, collapsed: false },
-  { key: 'user_story', title: 'User story', order: 4, visible: true, collapsed: false },
+  { key: 'user_need', title: 'User needs', order: 2, visible: true, collapsed: false },
+  { key: 'pain_point', title: 'Pain points', order: 3, visible: true, collapsed: false },
+  { key: 'user_story', title: 'User stories', order: 4, visible: true, collapsed: false },
 ];
 
 /**
@@ -113,7 +113,7 @@ export const LANE_TITLE_MAP = {
   user_action_event: 'User action',
   user_story: 'User stories',
   frontstage_touchpoint: 'Frontstage touchpoint',
-  activity: 'Activity',
+  activity: 'Tasks',
   backstage_process: 'Backstage process',
   description: 'Description',
   behaviour_change: 'Desired behaviour change',

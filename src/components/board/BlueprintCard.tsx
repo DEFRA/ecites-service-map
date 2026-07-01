@@ -20,10 +20,24 @@ import {
   formatUserStoryHeading,
   userStoryStatusPillClass,
 } from '@/lib/user-story-records';
+import { resolveJiraIssueRecord } from '@/lib/jira-issue-import';
 
 interface BlueprintCardProps {
   card: Card;
   isDragOverlay?: boolean;
+}
+
+function extractJiraIssueKeyFromText(text: string): string | null {
+  const match = text.match(/\b[A-Z]{1,10}-\d+\b/);
+  return match ? match[0] : null;
+}
+
+function formatGenericJiraHeading(issueKey: string | null, summary?: string, fallback = ''): string {
+  const trimmedSummary = summary?.trim();
+  if (issueKey && trimmedSummary) return `${issueKey} ${trimmedSummary}`;
+  if (issueKey) return issueKey;
+  if (trimmedSummary) return trimmedSummary;
+  return fallback;
 }
 
 export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
@@ -34,7 +48,9 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
   const selectedCardId = useBlueprintStore((s) => s.selectedCardId);
   const readOnly = useBlueprintStore((s) => s.readOnly);
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
+  const userNeedRecords = useBlueprintStore((s) => s.userNeedRecords ?? {});
   const userStoryRecords = useBlueprintStore((s) => s.userStoryRecords ?? {});
+  const jiraIssueRecords = useBlueprintStore((s) => s.jiraIssueRecords ?? {});
   const isSelected = selectedCardId === card.id;
 
   const [editing, setEditing] = useState(false);
@@ -151,11 +167,26 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
   const storyIssueKey = card.laneKey === 'user_story' ? extractUserStoryIssueKey(card) : null;
   const painRecord = painIssueKey ? painPointRecords[painIssueKey] : undefined;
   const storyRecord = storyIssueKey ? userStoryRecords[storyIssueKey] : undefined;
+  const genericIssueKey =
+    card.laneKey === 'user_need' || card.laneKey === 'activity'
+      ? extractJiraIssueKeyFromText(baseTitle)
+      : null;
+  const genericRecord =
+    genericIssueKey && (card.laneKey === 'user_need' || card.laneKey === 'activity')
+      ? resolveJiraIssueRecord(genericIssueKey, {
+          painPointRecords,
+          userNeedRecords,
+          userStoryRecords,
+          jiraIssueRecords,
+        })
+      : undefined;
   const displayTitle =
     card.laneKey === 'pain_point' && painIssueKey
       ? formatPainPointHeading(painIssueKey, painRecord?.summary, baseTitle)
       : card.laneKey === 'user_story' && storyIssueKey
         ? formatUserStoryHeading(storyIssueKey, storyRecord?.summary, baseTitle)
+        : (card.laneKey === 'user_need' || card.laneKey === 'activity') && genericIssueKey
+          ? formatGenericJiraHeading(genericIssueKey, genericRecord?.summary, baseTitle)
         : baseTitle;
   const displayBody = stripRollupsForCardDisplay(stripTraceabilityForDisplay(card.body));
 
@@ -179,7 +210,9 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
     >
       <div className="flex items-center gap-1">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium leading-tight text-neutral-800">{displayTitle}</p>
+          <p className="text-xs font-medium leading-tight text-neutral-800">
+            {displayTitle}
+          </p>
           {card.laneKey === 'pain_point' && painRecord?.status && (
             <div
               className={cn(
@@ -198,6 +231,11 @@ export function BlueprintCard({ card, isDragOverlay }: BlueprintCardProps) {
               )}
             >
               {storyRecord.status}
+            </div>
+          )}
+          {(card.laneKey === 'user_need' || card.laneKey === 'activity') && genericRecord?.status && (
+            <div className="mt-1 w-full rounded-md border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold leading-snug text-neutral-700">
+              {genericRecord.status}
             </div>
           )}
           {displayBody && (

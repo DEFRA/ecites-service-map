@@ -1,4 +1,4 @@
-import type { Card, LaneKey, PainPointRecord, UserStoryRecord } from './types';
+import type { Card, JiraIssueRecord, LaneKey, PainPointRecord, UserNeedRecord, UserStoryRecord } from './types';
 import type { L1BoardLayout } from './board-columns';
 import {
   extractPainPointIssueKey,
@@ -29,7 +29,9 @@ export function isJourneyFilterLane(laneKey: LaneKey): laneKey is JourneyFilterL
 
 export interface JourneyFilterRecords {
   painPointRecords?: Record<string, PainPointRecord>;
+  userNeedRecords?: Record<string, UserNeedRecord>;
   userStoryRecords?: Record<string, UserStoryRecord>;
+  jiraIssueRecords?: Record<string, JiraIssueRecord>;
 }
 
 export interface JourneyLaneFilterOptions extends JourneyFilterRecords {
@@ -56,6 +58,34 @@ function userStoryStatusForCard(
   return status || null;
 }
 
+function extractGenericIssueKeyFromCard(card: Card): string | null {
+  const title = card.title?.trim() ?? '';
+  const match = title.match(/\b[A-Z]{1,10}-\d+\b/);
+  if (match) return match[0];
+  const code = card.traceabilityCode?.trim();
+  if (code && /\b[A-Z]{1,10}-\d+\b/.test(code)) return code;
+  return null;
+}
+
+function resolveJiraLikeRecord(
+  issueKey: string,
+  records?: JourneyFilterRecords,
+): JiraIssueRecord | undefined {
+  return (
+    records?.painPointRecords?.[issueKey]
+    ?? records?.userNeedRecords?.[issueKey]
+    ?? records?.userStoryRecords?.[issueKey]
+    ?? records?.jiraIssueRecords?.[issueKey]
+  );
+}
+
+function userNeedStatusForCard(card: Card, records?: JourneyFilterRecords): string | null {
+  const issueKey = extractGenericIssueKeyFromCard(card);
+  if (!issueKey) return null;
+  const status = resolveJiraLikeRecord(issueKey, records)?.status?.trim();
+  return status || null;
+}
+
 function cardMatchesJourneyFilter(
   card: Card,
   target: string,
@@ -66,6 +96,12 @@ function cardMatchesJourneyFilter(
   }
   if (options?.laneKey === 'user_story' && options.userStoryRecords) {
     return userStoryStatusForCard(card, options.userStoryRecords) === target;
+  }
+  if (options?.laneKey === 'user_need') {
+    const status = userNeedStatusForCard(card, options);
+    if (status) return status === target;
+    // Fallback for boards without Jira metadata imported: filter by the visible text.
+    return card.title.trim() === target;
   }
   return card.title.trim() === target;
 }
@@ -112,6 +148,20 @@ export function collectUserStoryStatuses(
     const byWorkflow = userStoryStatusSortIndex(b) - userStoryStatusSortIndex(a);
     return byWorkflow !== 0 ? byWorkflow : a.localeCompare(b);
   });
+}
+
+/** Distinct user need statuses on the board. */
+export function collectUserNeedStatuses(
+  cards: Card[],
+  records?: JourneyFilterRecords,
+): string[] {
+  const seen = new Set<string>();
+  for (const card of cards) {
+    if (card.laneKey !== 'user_need') continue;
+    const status = userNeedStatusForCard(card, records);
+    if (status) seen.add(status);
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 /** Dedupe key for a card in a column (coded lanes dedupe by code when present). */
@@ -245,7 +295,9 @@ export function subStepIdsForLaneFilter(
   const laneOptions: JourneyLaneFilterOptions = {
     laneKey,
     painPointRecords: options?.painPointRecords,
+    userNeedRecords: options?.userNeedRecords,
     userStoryRecords: options?.userStoryRecords,
+    jiraIssueRecords: options?.jiraIssueRecords,
   };
   for (const card of cards) {
     if (card.laneKey !== laneKey) continue;
@@ -286,7 +338,9 @@ export function visibleSubStepIdsForJourneyFilters(
         subStepIdsForLaneFilter(cards, laneKey, filter, layout, {
           laneKey,
           painPointRecords: records?.painPointRecords,
+          userNeedRecords: records?.userNeedRecords,
           userStoryRecords: records?.userStoryRecords,
+          jiraIssueRecords: records?.jiraIssueRecords,
         }),
       );
     }

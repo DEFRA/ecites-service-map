@@ -154,6 +154,9 @@ export interface UserStoryRecord {
   parentSummary?: string;
 }
 
+/** Metadata imported from a Jira user need export, keyed by issue key (e.g. CTS-746). */
+export type UserNeedRecord = PainPointRecord;
+
 /** Metadata imported from a Jira export for any issue type, keyed by issue key. */
 export type JiraIssueRecord = PainPointRecord;
 
@@ -493,9 +496,11 @@ export interface BlueprintState {
   descriptionVisibleInUserJourney?: boolean;
   /** Jira pain point metadata keyed by issue key (e.g. CTS-95). */
   painPointRecords?: Record<string, PainPointRecord>;
+  /** Jira user need metadata keyed by issue key (e.g. CTS-746). */
+  userNeedRecords?: Record<string, UserNeedRecord>;
   /** Jira user story metadata keyed by issue key (e.g. CTS-165). */
   userStoryRecords?: Record<string, UserStoryRecord>;
-  /** Jira metadata for other issue types (e.g. User Need), keyed by issue key. */
+  /** Jira metadata for other issue types, keyed by issue key. */
   jiraIssueRecords?: Record<string, JiraIssueRecord>;
   cardLinks: CardLink[];
   evidence: Evidence[];

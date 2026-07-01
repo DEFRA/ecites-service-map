@@ -26,7 +26,7 @@ const ICON_MAP: Record<JourneyFilterLaneKey, React.ElementType> = {
 const ALL_LABEL: Record<JourneyFilterLaneKey, string> = {
   actor: 'All actors',
   system: 'All systems',
-  user_need: 'All user needs',
+  user_need: 'All statuses',
   pain_point: 'All statuses',
   user_story: 'All statuses',
 };

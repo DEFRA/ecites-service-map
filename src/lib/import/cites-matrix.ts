@@ -156,6 +156,11 @@ function findMatrixRow(rows: string[][], ...labels: string[]): string[] | undefi
   return rows.find((row) => wanted.has(normalizeMatrixLabel(String(row[0] ?? ''))));
 }
 
+function findMatrixRowIndex(rows: string[][], ...labels: string[]): number {
+  const wanted = new Set(labels.map(normalizeMatrixLabel));
+  return rows.findIndex((row) => wanted.has(normalizeMatrixLabel(String(row[0] ?? ''))));
+}
+
 function resolveLaneKey(label: string): LaneKey | null {
   const key = LANE_ALIASES[label] ?? label;
   if (validateLaneKey(key, 0) === null) return key as LaneKey;
@@ -443,7 +448,9 @@ export function normalizeCitesBlueprintMatrix(
     for (let colIdx = 0; colIdx < colCount; colIdx++) {
       const stage = stageMap.get(filledStages[colIdx]);
       const text = filled[colIdx]?.trim();
-      if (stage && text) stage.description = text;
+      if (stage && text) {
+        stage.description = text;
+      }
     }
   }
 
@@ -453,7 +460,9 @@ export function normalizeCitesBlueprintMatrix(
       const stepKey = `${filledStages[colIdx]}::${filledSteps[colIdx]}`;
       const step = stepMap.get(stepKey);
       const text = filled[colIdx]?.trim();
-      if (step && text) step.description = text;
+      if (step && text) {
+        step.description = text;
+      }
     }
   }
 
@@ -462,7 +471,9 @@ export function normalizeCitesBlueprintMatrix(
     for (let colIdx = 0; colIdx < colCount; colIdx++) {
       const subStep = colToSubStep.get(colIdx);
       const text = cells[colIdx]?.trim();
-      if (subStep && text && !subStep.description) subStep.description = text;
+      if (subStep && text && !subStep.description) {
+        subStep.description = text;
+      }
     }
   }
 
@@ -496,7 +507,7 @@ export function normalizeCitesBlueprintMatrix(
       if (!subStep) continue;
       const cellValue = cells[colIdx] ?? '';
       const items = splitLaneCellItems(cellValue);
-      for (const item of items) {
+      items.forEach((item, itemIdx) => {
         const stage = stageMap.get(filledStages[colIdx])!;
         const stepKey = `${filledStages[colIdx]}::${filledSteps[colIdx]}`;
         const step = stepMap.get(stepKey)!;
@@ -531,7 +542,7 @@ export function normalizeCitesBlueprintMatrix(
           createdAt: ts,
           updatedAt: ts,
         });
-      }
+      });
     }
   }
 
@@ -565,25 +576,27 @@ export function normalizeCitesBlueprintMatrix(
 }
 
 /**
- * Replaces stages, steps, sub-steps and lane cards from the CITES CSV while keeping
+ * Replaces stages, steps, sub-steps and lane cards from a parsed CITES matrix while keeping
  * the current blueprint identity, storyboard images, and Jira pain point details.
  */
-export function applyCitesBlueprintImport(
+export function applyCitesBlueprintMatrixImport(
   current: BlueprintState,
-  csvText: string,
-  sourceFile = 'cites-service-blueprint.csv',
+  rawMatrix: string[][],
+  sourceFile: string,
   sourceSheet?: string,
 ): BlueprintState {
-  const raw = parseCitesBlueprintRaw(csvText);
   const { state: imported, errors } = normalizeCitesBlueprintMatrix(
-    raw,
+    rawMatrix,
     sourceFile,
     sourceSheet ?? 'Sheet1',
   );
   if (errors.length > 0) {
     throw new Error(errors.map((e) => e.message).join('; '));
   }
+  return mergeCitesImportIntoCurrent(current, imported);
+}
 
+function mergeCitesImportIntoCurrent(current: BlueprintState, imported: BlueprintState): BlueprintState {
   const previousStructure = {
     stages: current.stages,
     steps: current.steps,
@@ -624,6 +637,7 @@ export function applyCitesBlueprintImport(
     childBlueprints: current.childBlueprints ?? [],
     storyboardImages,
     painPointRecords: { ...(current.painPointRecords ?? {}) },
+    userNeedRecords: { ...(current.userNeedRecords ?? {}) },
     userStoryRecords: { ...(current.userStoryRecords ?? {}) },
     jiraIssueRecords: { ...(current.jiraIssueRecords ?? {}) },
     lanes: mergeLaneDefinitions(current.lanes ?? [], imported.lanes, imported.cards),
@@ -632,6 +646,29 @@ export function applyCitesBlueprintImport(
       ...(imported.traceabilityCounters ?? {}),
     },
   };
+}
+
+/**
+ * Replaces stages, steps, sub-steps and lane cards from the CITES CSV while keeping
+ * the current blueprint identity, storyboard images, and Jira pain point details.
+ */
+export function applyCitesBlueprintImport(
+  current: BlueprintState,
+  csvText: string,
+  sourceFile = 'cites-service-blueprint.csv',
+  sourceSheet?: string,
+): BlueprintState {
+  const raw = parseCitesBlueprintRaw(csvText);
+  const { state: imported, errors } = normalizeCitesBlueprintMatrix(
+    raw,
+    sourceFile,
+    sourceSheet ?? 'Sheet1',
+  );
+  if (errors.length > 0) {
+    throw new Error(errors.map((e) => e.message).join('; '));
+  }
+
+  return mergeCitesImportIntoCurrent(current, imported);
 }
 
 /** True when adjacent sub-step headers were imported as separate columns (pre-merge import). */

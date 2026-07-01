@@ -16,7 +16,7 @@
  * the review step first. Only the user-confirmed commit triggers loadBlueprint.
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -49,9 +49,11 @@ import type { MappedRow, RowRecordType, ReviewStatus } from '@/lib/import/mappin
 import { commitMappedRows } from '@/lib/import/commit';
 import {
   applyCitesBlueprintImport,
+  applyCitesBlueprintMatrixImport,
   detectCitesBlueprintMatrix,
   parseCitesBlueprintRaw,
 } from '@/lib/import/cites-matrix';
+import { detectJiraIssueExport, headersFromXlsxSheet } from '@/lib/jira-issue-import';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { LANE_KEYS, type LaneKey } from '@/lib/types';
 import { LANE_TITLE_MAP } from '@/lib/lane-definitions';
@@ -101,6 +103,12 @@ function recordTypeBadge(type: RowRecordType): { label: string; className: strin
 function truncate(text: string, max: number): string {
   if (!text) return '—';
   return text.length <= max ? text : text.slice(0, max) + '…';
+}
+
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 }
 
 const RECORD_TYPE_OPTIONS: RowRecordType[] = ['card_row', 'structure_row', 'noise_row'];
@@ -397,6 +405,7 @@ function RowEditor({ row, index, onChange }: RowEditorProps) {
 export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
   const replaceActiveBlueprint = useBlueprintStore((s) => s.replaceActiveBlueprint);
   const fileRef = useRef<HTMLInputElement>(null);
+  const extractionJobRef = useRef(0);
 
   const [step, setStep] = useState<AiImportStep>('upload');
   const [dragOver, setDragOver] = useState(false);
@@ -413,6 +422,23 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
   const [committedCardCount, setCommittedCardCount] = useState(0);
   const [committedStageCount, setCommittedStageCount] = useState(0);
   const [committedUserStoryCount, setCommittedUserStoryCount] = useState(0);
+  const [progressDetail, setProgressDetail] = useState<string | null>(null);
+
+  // If extraction hangs (large file / browser parsing issue), fail gracefully instead of spinning forever.
+  useEffect(() => {
+    if (step !== 'extracting') return;
+    const jobId = extractionJobRef.current;
+    const timer = window.setTimeout(() => {
+      if (extractionJobRef.current !== jobId) return;
+      setMappingErrors([
+        'Reading the file is taking longer than expected. This can happen with very large Excel/PDF files, or if the browser has trouble parsing them.',
+        'Try again, or export a smaller file (for example, one sheet or a smaller date range).',
+      ]);
+      setMappedRows([]);
+      setStep('review');
+    }, 20000);
+    return () => window.clearTimeout(timer);
+  }, [step]);
 
   // ── Reset ────────────────────────────────────────────────────────────────
 
@@ -432,6 +458,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
     setCommittedCardCount(0);
     setCommittedStageCount(0);
     setCommittedUserStoryCount(0);
+    setProgressDetail(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -442,6 +469,7 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
   // ── Run mapping service ───────────────────────────────────────────────────
 
   const runMapping = useCallback(async (rows: ExtractedRow[]) => {
+    setProgressDetail(null);
     setStep('mapping');
     try {
       const result = await MAPPING_SERVICE.mapRows(rows);
@@ -460,73 +488,27 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
 
   const processFile = useCallback(
     async (file: File) => {
+      extractionJobRef.current += 1;
       setFileName(file.name);
       setStep('extracting');
 
-      // Small delay so the spinner renders before synchronous parsing blocks the thread
-      await new Promise((r) => setTimeout(r, 80));
+      try {
+        // Small delay so the spinner renders before synchronous parsing blocks the thread
+        await new Promise((r) => setTimeout(r, 80));
 
-      const ext = file.name.split('.').pop()?.toLowerCase();
+        const ext = file.name.split('.').pop()?.toLowerCase();
 
-      if (ext === 'csv') {
-        const text = await file.text();
-        const rawMatrix = parseCitesBlueprintRaw(text);
-        if (detectCitesBlueprintMatrix(rawMatrix)) {
-          try {
-            const current = useBlueprintStore.getState().getPersistableDocument();
-            const merged = applyCitesBlueprintImport(current, text, file.name);
-            setServiceName(merged.blueprint.serviceName);
-            setCommittedCardCount(merged.cards.length);
-            setCommittedStageCount(merged.stages.length);
-            setCommittedUserStoryCount(
-              merged.cards.filter((card) => card.laneKey === 'user_story').length,
-            );
-            replaceActiveBlueprint(merged);
-            setStep('done');
-          } catch (err) {
-            setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
-            setMappedRows([]);
-            setStep('review');
-          }
-          return;
-        }
-        const extraction = extractFromCsv(text, file.name);
-        setExtractedRows(extraction.rows);
-        await runMapping(extraction.rows);
-        return;
-      }
-
-      if (ext === 'xlsx' || ext === 'xls') {
-        const buffer = await file.arrayBuffer();
-        const { sheets: sheetList, workbook: wb } = parseXlsx(buffer, file.name);
-        setWorkbook(wb);
-
-        const visibleSheets = sheetList.filter((s) => s.rowCount > 1);
-        setSheets(visibleSheets);
-
-        if (visibleSheets.length === 0) {
-          setMappingErrors(['No sheets with data found']);
-          setMappedRows([]);
-          setStep('review');
-          return;
-        }
-
-        if (visibleSheets.length === 1) {
-          const sheetName = visibleSheets[0].name;
-          const ws = wb.Sheets[sheetName];
-          const rawMatrix = ws
-            ? (XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][])
-            : [];
+        if (ext === 'csv') {
+          const text = await file.text();
+          const rawMatrix = parseCitesBlueprintRaw(text);
           if (detectCitesBlueprintMatrix(rawMatrix)) {
             try {
-              const csvText = XLSX.utils.sheet_to_csv(ws!);
+              setProgressDetail('Importing master service details…');
+              setStep('mapping');
+              await yieldToMain();
               const current = useBlueprintStore.getState().getPersistableDocument();
-              const merged = applyCitesBlueprintImport(
-                current,
-                csvText,
-                file.name,
-                wb.SheetNames[0],
-              );
+              const merged = applyCitesBlueprintImport(current, text, file.name);
+              await yieldToMain();
               setServiceName(merged.blueprint.serviceName);
               setCommittedCardCount(merged.cards.length);
               setCommittedStageCount(merged.stages.length);
@@ -542,36 +524,109 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
             }
             return;
           }
-          const extraction = extractFromXlsx(wb, sheetName, file.name);
+          const extraction = extractFromCsv(text, file.name);
           setExtractedRows(extraction.rows);
           await runMapping(extraction.rows);
-        } else {
-          setStep('sheet-select');
+          return;
         }
-        return;
-      }
 
-      if (ext === 'pdf') {
-        const buffer = await file.arrayBuffer();
-        const extraction = await extractFromPdf(buffer, file.name);
-        setExtractedRows(extraction.rows);
-        if (extraction.errors.length > 0) {
-          setMappingErrors(extraction.errors);
-          setMappedRows([]);
-          setStep('review');
-        } else {
-          await runMapping(extraction.rows);
+        if (ext === 'xlsx' || ext === 'xls') {
+          setProgressDetail('Reading spreadsheet…');
+          const buffer = await file.arrayBuffer();
+          const { sheets: sheetList, workbook: wb } = parseXlsx(buffer, file.name);
+          setWorkbook(wb);
+
+          const visibleSheets = sheetList.filter((s) => s.rowCount > 1);
+          setSheets(visibleSheets);
+
+          if (visibleSheets.length === 0) {
+            setMappingErrors(['No sheets with data found']);
+            setMappedRows([]);
+            setStep('review');
+            return;
+          }
+
+          const firstSheet = wb.Sheets[visibleSheets[0].name];
+          if (firstSheet && detectJiraIssueExport(headersFromXlsxSheet(firstSheet))) {
+            setMappingErrors([
+              'This file looks like a Jira issue export.',
+              'Close this dialog, then use Import → Jira issue metadata instead.',
+            ]);
+            setMappedRows([]);
+            setStep('review');
+            return;
+          }
+
+          const importCitesXlsx = (sheetName: string, rawMatrix: string[][]) => {
+            const current = useBlueprintStore.getState().getPersistableDocument();
+            return applyCitesBlueprintMatrixImport(current, rawMatrix, file.name, sheetName);
+          };
+
+          if (visibleSheets.length === 1) {
+            const sheetName = visibleSheets[0].name;
+            const ws = wb.Sheets[sheetName];
+            const rawMatrix = ws
+              ? (XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][])
+              : [];
+            if (detectCitesBlueprintMatrix(rawMatrix)) {
+              try {
+                setProgressDetail('Importing master service details…');
+                setStep('mapping');
+                await yieldToMain();
+                const merged = importCitesXlsx(sheetName, rawMatrix);
+                await yieldToMain();
+                setServiceName(merged.blueprint.serviceName);
+                setCommittedCardCount(merged.cards.length);
+                setCommittedStageCount(merged.stages.length);
+                setCommittedUserStoryCount(
+                  merged.cards.filter((card) => card.laneKey === 'user_story').length,
+                );
+                replaceActiveBlueprint(merged);
+                setProgressDetail(null);
+                setStep('done');
+              } catch (err) {
+                setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
+                setMappedRows([]);
+                setProgressDetail(null);
+                setStep('review');
+              }
+              return;
+            }
+            const extraction = extractFromXlsx(wb, sheetName, file.name);
+            setExtractedRows(extraction.rows);
+            await runMapping(extraction.rows);
+          } else {
+            setStep('sheet-select');
+          }
+          return;
         }
-        return;
-      }
 
-      setMappingErrors([
-        `Unsupported file type: .${ext ?? 'unknown'}. Use CSV, XLSX, or PDF.`,
-      ]);
-      setMappedRows([]);
-      setStep('review');
+        if (ext === 'pdf') {
+          const buffer = await file.arrayBuffer();
+          const extraction = await extractFromPdf(buffer, file.name);
+          setExtractedRows(extraction.rows);
+          if (extraction.errors.length > 0) {
+            setMappingErrors(extraction.errors);
+            setMappedRows([]);
+            setStep('review');
+          } else {
+            await runMapping(extraction.rows);
+          }
+          return;
+        }
+
+        setMappingErrors([
+          `Unsupported file type: .${ext ?? 'unknown'}. Use CSV, XLSX, or PDF.`,
+        ]);
+        setMappedRows([]);
+        setStep('review');
+      } catch (err) {
+        setMappingErrors([err instanceof Error ? err.message : 'Could not read this file. Try again or use a smaller export.']);
+        setMappedRows([]);
+        setStep('review');
+      }
     },
-    [runMapping],
+    [runMapping, replaceActiveBlueprint],
   );
 
   // ── Sheet selection ───────────────────────────────────────────────────────
@@ -587,14 +642,17 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
         : [];
       if (detectCitesBlueprintMatrix(rawMatrix)) {
         try {
-          const csvText = XLSX.utils.sheet_to_csv(ws!);
+          setProgressDetail('Importing master service details…');
+          setStep('mapping');
+          await yieldToMain();
           const current = useBlueprintStore.getState().getPersistableDocument();
-          const merged = applyCitesBlueprintImport(
+          const merged = applyCitesBlueprintMatrixImport(
             current,
-            csvText,
+            rawMatrix,
             fileName,
-            workbook.SheetNames[0],
+            sheetName,
           );
+          await yieldToMain();
           setServiceName(merged.blueprint.serviceName);
           setCommittedCardCount(merged.cards.length);
           setCommittedStageCount(merged.stages.length);
@@ -602,10 +660,12 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
             merged.cards.filter((card) => card.laneKey === 'user_story').length,
           );
           replaceActiveBlueprint(merged);
+          setProgressDetail(null);
           setStep('done');
         } catch (err) {
           setMappingErrors([err instanceof Error ? err.message : 'CITES import failed']);
           setMappedRows([]);
+          setProgressDetail(null);
           setStep('review');
         }
         return;
@@ -784,7 +844,14 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
         {step === 'extracting' && (
           <div className="flex flex-col items-center gap-3 py-12">
             <Loader2 className="h-8 w-8 animate-spin text-neutral-400" />
-            <p className="text-[14px] font-medium text-neutral-700">Reading source data…</p>
+            <p className="text-[14px] font-medium text-neutral-700">
+              {progressDetail ?? 'Reading source data…'}
+            </p>
+            {progressDetail && (
+              <p className="text-[12px] text-neutral-400">
+                This may take a moment for larger spreadsheets.
+              </p>
+            )}
           </div>
         )}
 
@@ -793,12 +860,16 @@ export function AiImportDialog({ open, onClose }: AiImportDialogProps) {
           <div className="flex flex-col items-center gap-3 py-12">
             <div className="relative">
               <Loader2 className="h-8 w-8 animate-spin text-neutral-300" />
-              <Sparkles className="absolute inset-0 m-auto h-4 w-4 text-violet-500" />
+              {!progressDetail && <Sparkles className="absolute inset-0 m-auto h-4 w-4 text-violet-500" />}
             </div>
             <p className="text-[14px] font-medium text-neutral-700">
-              Analysing {extractedRows.length} rows…
+              {progressDetail ?? `Analysing ${extractedRows.length} rows…`}
             </p>
-            <p className="text-[12px] text-neutral-400">Inferring stages, steps, and lane mappings</p>
+            <p className="text-[12px] text-neutral-400">
+              {progressDetail
+                ? 'This may take a moment for larger spreadsheets.'
+                : 'Inferring stages, steps, and lane mappings'}
+            </p>
           </div>
         )}
 

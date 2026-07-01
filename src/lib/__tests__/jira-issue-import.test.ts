@@ -35,20 +35,21 @@ describe('validateJiraIssueHeaders', () => {
 });
 
 describe('parseJiraIssueCsv', () => {
-  it('imports the CITES Jira example row into other issue metadata', () => {
+  it('imports the CITES Jira example row into user need metadata', () => {
     const result = parseJiraIssueCsv(EXAMPLE_CSV);
     expect(result.errors).toEqual([]);
     expect(result.imported).toBe(1);
     expect(result.painPointRecords).toEqual({});
     expect(result.userStoryRecords).toEqual({});
-    expect(result.jiraIssueRecords['CTS-746']).toMatchObject({
+    expect(result.jiraIssueRecords).toEqual({});
+    expect(result.userNeedRecords['CTS-746']).toMatchObject({
       issueKey: 'CTS-746',
       summary: 'I NEED visibility of the activities of related agents and agencies',
       status: 'To Do',
       issueType: 'User Need',
       labels: 'AS_A_borderForceOfficer',
     });
-    expect(result.jiraIssueRecords['CTS-746'].description).toContain('AS A Border Force officer');
+    expect(result.userNeedRecords['CTS-746'].description).toContain('AS A Border Force officer');
   });
 
   it('rejects files without required Jira columns', () => {
@@ -69,9 +70,10 @@ describe('collectLabelsFromRow', () => {
 });
 
 describe('issueTypeImportTarget', () => {
-  it('routes pain points and stories', () => {
+  it('routes pain points, user needs and stories', () => {
     expect(issueTypeImportTarget('Pain point')).toBe('pain_point');
+    expect(issueTypeImportTarget('User Need')).toBe('user_need');
     expect(issueTypeImportTarget('User Story')).toBe('user_story');
-    expect(issueTypeImportTarget('User Need')).toBe('other');
+    expect(issueTypeImportTarget('Task')).toBe('activity');
   });
 });

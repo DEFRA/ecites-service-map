@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, type ChangeEvent } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Upload,
   Download,
@@ -12,6 +12,7 @@ import {
   ListTree,
   SquareStack,
   BookOpen,
+  RotateCcw,
 } from 'lucide-react';
 import { useBlueprintStore } from '@/store/blueprint-store';
 import { cn } from '@/lib/utils';
@@ -23,11 +24,6 @@ import {
   exportStoryboardImagesZip,
   storyboardImagesExportFilename,
 } from '@/lib/export-storyboard-images';
-import {
-  parseBlueprintBackupJson,
-  parseStoryboardImagesZip,
-} from '@/lib/import-storyboard-images';
-import { parseJiraIssueFile } from '@/lib/jira-issue-import';
 import { blueprintTitleLabel } from '@/lib/blueprint-title';
 import { activeUserJourney, userJourneyHeading } from '@/lib/user-journey';
 import type { Card, Opportunity } from '@/lib/types';
@@ -38,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { BlueprintImportPanel } from '@/components/import/BlueprintImportPanel';
 
 const SHOW_EXAMPLE_TREE_MENU_ITEM = false;
 /** Blank Goal → Outcome → Opportunity tree (“New opportunity tree” in UI). Hidden from menu; store action remains available. */
@@ -118,9 +115,9 @@ export function BoardToolbar({
   const requirements = useBlueprintStore((s) => s.requirements);
   const apiContracts = useBlueprintStore((s) => s.apiContracts);
   const uiScaffolds = useBlueprintStore((s) => s.uiScaffolds);
-  const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
-  const importStoryboardImages = useBlueprintStore((s) => s.importStoryboardImages);
-  const importJiraIssueMetadata = useBlueprintStore((s) => s.importJiraIssueMetadata);
+  const newBlueprint = useBlueprintStore((s) => s.newBlueprint);
+  const painPointRecords = useBlueprintStore((s) => s.painPointRecords);
+  const jiraIssueRecords = useBlueprintStore((s) => s.jiraIssueRecords);
   const readOnly = useBlueprintStore((s) => s.readOnly);
 
   const isChildView = Boolean(rootDocument && activeBlueprintId !== rootBlueprintId);
@@ -152,14 +149,12 @@ export function BoardToolbar({
   const [name, setName] = useState(() => blueprintTitleLabel(blueprint.serviceName));
   const [showLanes, setShowLanes] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showStartFreshDialog, setShowStartFreshDialog] = useState(false);
   const [transferDialog, setTransferDialog] = useState<'import' | 'export' | null>(null);
   const [transferNotice, setTransferNotice] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
   const lanesTriggerRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const storyboardImportRef = useRef<HTMLInputElement>(null);
-  const backupImportRef = useRef<HTMLInputElement>(null);
-  const jiraIssueImportRef = useRef<HTMLInputElement>(null);
 
   const contextualOpportunityCount = countContextualUserOpportunities(opportunities, cards);
 
@@ -186,6 +181,22 @@ export function BoardToolbar({
     setTransferDialog(null);
     setTransferNotice('');
   };
+
+  const handleStartFresh = () => {
+    newBlueprint();
+    setName(blueprintTitleLabel('Untitled Blueprint'));
+    setEditingName(false);
+    onAppViewChange?.('board');
+    setShowStartFreshDialog(false);
+    setShowMenu(false);
+  };
+
+  const hasBlueprintContent =
+    stages.length > 0 ||
+    cards.length > 0 ||
+    (storyboardImages?.length ?? 0) > 0 ||
+    Object.keys(painPointRecords ?? {}).length > 0 ||
+    Object.keys(jiraIssueRecords ?? {}).length > 0;
 
   const handleExportSpreadsheet = () => {
     setTransferNotice('');
@@ -221,91 +232,6 @@ export function BoardToolbar({
       blueprintBackupExportFilename(state),
     );
     closeTransferDialog();
-  };
-
-  const handleStoryboardImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    setTransferNotice('');
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    try {
-      const items = await parseStoryboardImagesZip(file);
-      const result = importStoryboardImages(items);
-      if (result.applied === 0) {
-        setTransferNotice('No storyboard images could be matched to this blueprint.');
-        return;
-      }
-      const unmatchedNote =
-        result.unmatched.length > 0
-          ? ` ${result.unmatched.length} image${result.unmatched.length === 1 ? '' : 's'} could not be matched.`
-          : '';
-      setTransferNotice(`Imported ${result.applied} storyboard image${result.applied === 1 ? '' : 's'}.${unmatchedNote}`);
-      if (result.unmatched.length === 0) {
-        closeTransferDialog();
-      }
-    } catch (err) {
-      setTransferNotice(err instanceof Error ? err.message : 'Could not import storyboard images.');
-    }
-  };
-
-  const handleBackupImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    setTransferNotice('');
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const backup = parseBlueprintBackupJson(text);
-      loadBlueprint(backup);
-      setTransferNotice('Blueprint backup imported.');
-      closeTransferDialog();
-    } catch (err) {
-      setTransferNotice(err instanceof Error ? err.message : 'Could not import blueprint backup.');
-    }
-  };
-
-  const handleJiraIssueImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    setTransferNotice('');
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    try {
-      const result = await parseJiraIssueFile(file);
-      if (result.errors.length > 0) {
-        setTransferNotice(result.errors[0] ?? 'Could not import Jira issue metadata.');
-        return;
-      }
-      if (result.imported === 0) {
-        setTransferNotice('No issue rows found in this file.');
-        return;
-      }
-      importJiraIssueMetadata(result);
-      const parts: string[] = [];
-      const painCount = Object.keys(result.painPointRecords).length;
-      const storyCount = Object.keys(result.userStoryRecords).length;
-      const otherCount = Object.keys(result.jiraIssueRecords).length;
-      if (painCount > 0) {
-        parts.push(`${painCount} pain point${painCount === 1 ? '' : 's'}`);
-      }
-      if (storyCount > 0) {
-        parts.push(`${storyCount} user stor${storyCount === 1 ? 'y' : 'ies'}`);
-      }
-      if (otherCount > 0) {
-        parts.push(`${otherCount} other issue${otherCount === 1 ? '' : 's'}`);
-      }
-      setTransferNotice(`Imported ${parts.join(', ')}.`);
-      closeTransferDialog();
-    } catch (err) {
-      setTransferNotice(err instanceof Error ? err.message : 'Could not import Jira issue metadata.');
-    }
-  };
-
-  const handleImportSpreadsheet = () => {
-    closeTransferDialog();
-    onImportSpreadsheet?.();
   };
 
   useEffect(() => {
@@ -642,6 +568,22 @@ export function BoardToolbar({
                   >
                     <Download aria-hidden="true" className="h-3.5 w-3.5" /> Export
                   </button>
+                  {!readOnly && (
+                    <>
+                      <div className="my-1 border-t border-neutral-100" role="separator" />
+                      <button
+                        role="menuitem"
+                        disabled={!hasBlueprintContent}
+                        onClick={() => {
+                          setShowStartFreshDialog(true);
+                          setShowMenu(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:bg-transparent"
+                      >
+                        <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" /> Start fresh
+                      </button>
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -661,83 +603,19 @@ export function BoardToolbar({
                 : 'Download storyboard images, a spreadsheet, or a full backup from this blueprint.'}
             </DialogDescription>
           </DialogHeader>
-          {transferNotice ? (
-            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              {transferNotice}
-            </p>
-          ) : null}
-          <input
-            ref={storyboardImportRef}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={handleStoryboardImportFile}
-          />
-          <input
-            ref={backupImportRef}
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={handleBackupImportFile}
-          />
-          <input
-            ref={jiraIssueImportRef}
-            type="file"
-            accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-            className="hidden"
-            onChange={handleJiraIssueImportFile}
-          />
           {transferDialog === 'import' ? (
-            readOnly ? (
-              <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-                Import is not available on read-only shared links. Open the main app to import files.
-              </p>
-            ) : (
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  onClick={() => storyboardImportRef.current?.click()}
-                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  <span className="text-sm font-semibold text-neutral-900">Storyboard images (zip)</span>
-                  <span className="text-xs leading-5 text-neutral-500">
-                    Reattach pictures exported from another browser or machine.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleImportSpreadsheet}
-                  disabled={!onImportSpreadsheet}
-                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="text-sm font-semibold text-neutral-900">Master service details</span>
-                  <span className="text-xs leading-5 text-neutral-500">
-                    Import stages, steps, lanes and card content from Excel or CSV.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => jiraIssueImportRef.current?.click()}
-                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  <span className="text-sm font-semibold text-neutral-900">Jira issue metadata</span>
-                  <span className="text-xs leading-5 text-neutral-500">
-                    Import summary, status and description from a Jira CSV or Excel export.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => backupImportRef.current?.click()}
-                  className="flex min-h-24 flex-col items-start justify-between rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  <span className="text-sm font-semibold text-neutral-900">Full backup (JSON)</span>
-                  <span className="text-xs leading-5 text-neutral-500">
-                    Load a complete blueprint backup, including storyboard images.
-                  </span>
-                </button>
-              </div>
-            )
+            <BlueprintImportPanel
+              readOnly={readOnly}
+              onImportSpreadsheet={onImportSpreadsheet}
+              onImportComplete={closeTransferDialog}
+            />
           ) : (
+            <>
+              {transferNotice ? (
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {transferNotice}
+                </p>
+              ) : null}
             <div className="grid gap-2">
               <button
                 type="button"
@@ -770,7 +648,39 @@ export function BoardToolbar({
                 </span>
               </button>
             </div>
+            </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showStartFreshDialog} onOpenChange={setShowStartFreshDialog}>
+        <DialogContent className="gap-5 p-5 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Start fresh?</DialogTitle>
+            <DialogDescription>
+              This clears all stages, steps, cards, storyboard images and imported Jira metadata from
+              this blueprint. Your work is removed from this browser only.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-[13px] leading-relaxed text-neutral-600">
+            Export a full backup first if you might need this blueprint again later.
+          </p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setShowStartFreshDialog(false)}
+              className="inline-flex items-center justify-center rounded-lg border border-neutral-200 bg-white px-4 py-2 text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleStartFresh}
+              className="inline-flex items-center justify-center rounded-lg bg-red-700 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
+            >
+              Start fresh
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

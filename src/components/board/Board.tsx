@@ -36,6 +36,7 @@ import { buildL1BoardLayout } from '@/lib/board-columns';
 import {
   collectJourneyLaneTypes,
   collectPainPointStatuses,
+  collectUserNeedStatuses,
   collectUserStoryStatuses,
   countHiddenJourneyLaneTypes,
   displayJourneyLaneCards,
@@ -219,7 +220,9 @@ export function Board() {
   const userStoryJourneyFilter = useBlueprintStore((s) => s.userStoryJourneyFilter ?? null);
   const setUserStoryJourneyFilter = useBlueprintStore((s) => s.setUserStoryJourneyFilter);
   const painPointRecords = useBlueprintStore((s) => s.painPointRecords ?? {});
+  const userNeedRecords = useBlueprintStore((s) => s.userNeedRecords ?? {});
   const userStoryRecords = useBlueprintStore((s) => s.userStoryRecords ?? {});
+  const jiraIssueRecords = useBlueprintStore((s) => s.jiraIssueRecords ?? {});
   const userJourneys = useBlueprintStore((s) => s.userJourneys ?? []);
   const activeUserJourneyId = useBlueprintStore((s) => s.activeUserJourneyId ?? null);
   const descriptionVisibleInUserJourney = useBlueprintStore(
@@ -470,8 +473,16 @@ export function Board() {
     [cards, l1Layout],
   );
   const userNeedTypes = useMemo(
-    () => collectJourneyLaneTypes(cards, l1Layout, 'user_need'),
-    [cards, l1Layout],
+    () => {
+      const statuses = collectUserNeedStatuses(cards, {
+        painPointRecords,
+        userNeedRecords,
+        userStoryRecords,
+        jiraIssueRecords,
+      });
+      return statuses.length > 0 ? statuses : collectJourneyLaneTypes(cards, l1Layout, 'user_need');
+    },
+    [cards, painPointRecords, userNeedRecords, userStoryRecords, jiraIssueRecords, l1Layout],
   );
   const painPointTypes = useMemo(
     () => collectPainPointStatuses(cards, painPointRecords),
@@ -527,7 +538,7 @@ export function Board() {
       user_need: userNeedJourneyFilter,
       pain_point: painPointJourneyFilter,
       user_story: userStoryJourneyFilter,
-    }, l1Layout, { painPointRecords, userStoryRecords });
+    }, l1Layout, { painPointRecords, userNeedRecords, userStoryRecords, jiraIssueRecords });
     if (laneFilterIds) sets.push(laneFilterIds);
     if (sets.length === 0) return null;
     return intersectSubStepIdSets(sets);
@@ -541,7 +552,9 @@ export function Board() {
     activeJourney,
     l1Layout,
     painPointRecords,
+    userNeedRecords,
     userStoryRecords,
+    jiraIssueRecords,
   ]);
 
   const displayL1Layout = useMemo(() => {
@@ -691,9 +704,12 @@ export function Board() {
     (laneKey: LaneKey) => {
       if (laneKey === 'pain_point') return { laneKey, painPointRecords };
       if (laneKey === 'user_story') return { laneKey, userStoryRecords };
+      if (laneKey === 'user_need') {
+        return { laneKey, painPointRecords, userNeedRecords, userStoryRecords, jiraIssueRecords };
+      }
       return undefined;
     },
-    [painPointRecords, userStoryRecords],
+    [painPointRecords, userNeedRecords, userStoryRecords, jiraIssueRecords],
   );
 
   const displayLaneCellCards = useCallback(
@@ -1131,7 +1147,7 @@ export function Board() {
         <p className="max-w-md text-[14px] leading-relaxed text-neutral-600">
           {activeJourney
             ? `No columns match the ${activeJourney.name} journey with the current filters. Try clearing lane filters, or switch back to Lifecycle.`
-            : 'No columns match the active lane filters. Clear filters from the Actors, Systems, User need or Pain points menus, or choose “All…”.'}
+            : 'No columns match the active lane filters. Clear filters from the Actors, Systems, User needs or Pain points menus, or choose “All…”.'}
         </p>
       </div>
     );

@@ -1,13 +1,14 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import type { JiraIssueRecord, PainPointRecord, UserStoryRecord } from './types';
+import type { JiraIssueRecord, PainPointRecord, UserNeedRecord, UserStoryRecord } from './types';
 import { mergePainPointRecords } from './pain-point-records';
 import { mergeUserStoryRecords } from './user-story-records';
 
-export type { JiraIssueRecord };
+export type { JiraIssueRecord, UserNeedRecord };
 
 export interface JiraIssueImportResult {
   painPointRecords: Record<string, PainPointRecord>;
+  userNeedRecords: Record<string, UserNeedRecord>;
   userStoryRecords: Record<string, UserStoryRecord>;
   jiraIssueRecords: Record<string, JiraIssueRecord>;
   imported: number;
@@ -57,11 +58,32 @@ export function collectLabelsFromRow(row: Record<string, string>): string[] {
   return [...new Set(labels)];
 }
 
-export function issueTypeImportTarget(issueType: string): 'pain_point' | 'user_story' | 'other' {
+export type JiraIssueImportLane =
+  | 'pain_point'
+  | 'user_need'
+  | 'user_story'
+  | 'activity'
+  | 'other';
+
+export function issueTypeImportTarget(issueType: string): JiraIssueImportLane {
   const normalized = issueType.trim().toLowerCase();
   if (normalized.includes('pain')) return 'pain_point';
+  if (normalized.includes('user need') || normalized === 'need') return 'user_need';
   if (normalized.includes('story')) return 'user_story';
+  if (normalized.includes('task')) return 'activity';
   return 'other';
+}
+
+/** True when the header row matches a Jira CSV/Excel export. */
+export function detectJiraIssueExport(headers: string[]): boolean {
+  if (headers.length === 0) return false;
+  return validateJiraIssueHeaders(headers).length === 0;
+}
+
+export function headersFromXlsxSheet(sheet: XLSX.WorkSheet): string[] {
+  const firstRow = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' })[0];
+  if (!Array.isArray(firstRow)) return [];
+  return firstRow.map((cell) => String(cell ?? '').trim()).filter(Boolean);
 }
 
 function rowToRecord(row: Record<string, string>): JiraIssueRecord | null {
@@ -83,6 +105,7 @@ function rowToRecord(row: Record<string, string>): JiraIssueRecord | null {
 
 function rowsToImportResult(rows: Record<string, string>[]): JiraIssueImportResult {
   const painPointRecords: Record<string, PainPointRecord> = {};
+  const userNeedRecords: Record<string, UserNeedRecord> = {};
   const userStoryRecords: Record<string, UserStoryRecord> = {};
   const jiraIssueRecords: Record<string, JiraIssueRecord> = {};
   const errors: string[] = [];
@@ -100,9 +123,11 @@ function rowsToImportResult(rows: Record<string, string>[]): JiraIssueImportResu
     const bucket =
       target === 'pain_point'
         ? painPointRecords
-        : target === 'user_story'
-          ? userStoryRecords
-          : jiraIssueRecords;
+        : target === 'user_need'
+          ? userNeedRecords
+          : target === 'user_story'
+            ? userStoryRecords
+            : jiraIssueRecords;
 
     if (bucket[record.issueKey] && bucket[record.issueKey].summary !== record.summary) {
       errors.push(`Row ${index + 2}: duplicate issue key "${record.issueKey}" with a different summary.`);
@@ -112,7 +137,7 @@ function rowsToImportResult(rows: Record<string, string>[]): JiraIssueImportResu
     imported += 1;
   });
 
-  return { painPointRecords, userStoryRecords, jiraIssueRecords, imported, skipped, errors };
+  return { painPointRecords, userNeedRecords, userStoryRecords, jiraIssueRecords, imported, skipped, errors };
 }
 
 export function parseJiraIssueCsv(text: string): JiraIssueImportResult {
@@ -126,6 +151,7 @@ export function parseJiraIssueCsv(text: string): JiraIssueImportResult {
   if (headerErrors.length > 0) {
     return {
       painPointRecords: {},
+      userNeedRecords: {},
       userStoryRecords: {},
       jiraIssueRecords: {},
       imported: 0,
@@ -147,6 +173,7 @@ export function parseJiraIssueWorkbook(buffer: ArrayBuffer, fileName: string): J
   if (!sheetName) {
     return {
       painPointRecords: {},
+      userNeedRecords: {},
       userStoryRecords: {},
       jiraIssueRecords: {},
       imported: 0,
@@ -166,6 +193,7 @@ export function parseJiraIssueWorkbook(buffer: ArrayBuffer, fileName: string): J
   if (headerErrors.length > 0) {
     return {
       painPointRecords: {},
+      userNeedRecords: {},
       userStoryRecords: {},
       jiraIssueRecords: {},
       imported: 0,
@@ -187,6 +215,7 @@ export async function parseJiraIssueFile(file: File): Promise<JiraIssueImportRes
   }
   return {
     painPointRecords: {},
+    userNeedRecords: {},
     userStoryRecords: {},
     jiraIssueRecords: {},
     imported: 0,
@@ -199,15 +228,24 @@ export function resolveJiraIssueRecord(
   issueKey: string,
   stores: {
     painPointRecords?: Record<string, PainPointRecord>;
+    userNeedRecords?: Record<string, UserNeedRecord>;
     userStoryRecords?: Record<string, UserStoryRecord>;
     jiraIssueRecords?: Record<string, JiraIssueRecord>;
   },
 ): JiraIssueRecord | undefined {
   return (
     stores.painPointRecords?.[issueKey]
+    ?? stores.userNeedRecords?.[issueKey]
     ?? stores.userStoryRecords?.[issueKey]
     ?? stores.jiraIssueRecords?.[issueKey]
   );
+}
+
+export function mergeUserNeedRecords(
+  existing: Record<string, UserNeedRecord> | undefined,
+  incoming: Record<string, UserNeedRecord>,
+): Record<string, UserNeedRecord> {
+  return { ...(existing ?? {}), ...incoming };
 }
 
 export function mergeJiraIssueRecords(
@@ -220,13 +258,18 @@ export function mergeJiraIssueRecords(
 export function mergeJiraIssueImportResult(
   current: {
     painPointRecords?: Record<string, PainPointRecord>;
+    userNeedRecords?: Record<string, UserNeedRecord>;
     userStoryRecords?: Record<string, UserStoryRecord>;
     jiraIssueRecords?: Record<string, JiraIssueRecord>;
   },
-  incoming: Pick<JiraIssueImportResult, 'painPointRecords' | 'userStoryRecords' | 'jiraIssueRecords'>,
+  incoming: Pick<
+    JiraIssueImportResult,
+    'painPointRecords' | 'userNeedRecords' | 'userStoryRecords' | 'jiraIssueRecords'
+  >,
 ) {
   return {
     painPointRecords: mergePainPointRecords(current.painPointRecords, incoming.painPointRecords),
+    userNeedRecords: mergeUserNeedRecords(current.userNeedRecords, incoming.userNeedRecords),
     userStoryRecords: mergeUserStoryRecords(current.userStoryRecords, incoming.userStoryRecords),
     jiraIssueRecords: mergeJiraIssueRecords(current.jiraIssueRecords, incoming.jiraIssueRecords),
   };

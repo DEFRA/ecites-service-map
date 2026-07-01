@@ -558,6 +558,7 @@ function normalizeState(state: BlueprintState): BlueprintState {
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userNeedRecords: { ...(state.userNeedRecords ?? {}) },
     userStoryRecords: { ...(state.userStoryRecords ?? {}) },
     jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: state.cardLinks ?? [],
@@ -734,7 +735,7 @@ interface BlueprintStore extends BlueprintState {
   /** Merge Jira user story metadata keyed by issue key (e.g. CTS-165). */
   importUserStoryRecords: (records: Record<string, UserStoryRecord>) => number;
   /** Merge Jira issue metadata from a CSV or Excel export (routes by issue type). */
-  importJiraIssueMetadata: (result: Pick<JiraIssueImportResult, 'painPointRecords' | 'userStoryRecords' | 'jiraIssueRecords'>) => number;
+  importJiraIssueMetadata: (result: Pick<JiraIssueImportResult, 'painPointRecords' | 'userNeedRecords' | 'userStoryRecords' | 'jiraIssueRecords'>) => number;
   toggleStoryboardVisible: () => void;
   toggleDescriptionRowVisible: () => void;
   toggleDescriptionRowCollapsed: () => void;
@@ -854,6 +855,7 @@ function emptyBlueprint(): BlueprintState {
     activeUserJourneyId: null,
     descriptionVisibleInUserJourney: false,
     painPointRecords: {},
+    userNeedRecords: {},
     userStoryRecords: {},
     jiraIssueRecords: {},
     cardLinks: [],
@@ -912,6 +914,7 @@ function pickDocumentState(state: BlueprintState): BlueprintState {
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userNeedRecords: { ...(state.userNeedRecords ?? {}) },
     userStoryRecords: { ...(state.userStoryRecords ?? {}) },
     jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: state.cardLinks,
@@ -1016,6 +1019,7 @@ function cloneDocumentState(state: BlueprintState): BlueprintState {
     activeUserJourneyId: state.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: state.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(state.painPointRecords ?? {}) },
+    userNeedRecords: { ...(state.userNeedRecords ?? {}) },
     userStoryRecords: { ...(state.userStoryRecords ?? {}) },
     jiraIssueRecords: { ...(state.jiraIssueRecords ?? {}) },
     cardLinks: (state.cardLinks ?? []).map((l) => ({ ...l })),
@@ -1149,6 +1153,7 @@ function persist(state: BlueprintState) {
     activeUserJourneyId: forDisk.activeUserJourneyId ?? null,
     descriptionVisibleInUserJourney: forDisk.descriptionVisibleInUserJourney ?? false,
     painPointRecords: { ...(forDisk.painPointRecords ?? {}) },
+    userNeedRecords: { ...(forDisk.userNeedRecords ?? {}) },
     userStoryRecords: { ...(forDisk.userStoryRecords ?? {}) },
     jiraIssueRecords: { ...(forDisk.jiraIssueRecords ?? {}) },
     cardLinks: forDisk.cardLinks,
@@ -2616,6 +2621,7 @@ export const useBlueprintStore = create<BlueprintStore>((set, get) => ({
       const records = mergeJiraIssueImportResult(current, result);
       merged =
         Object.keys(result.painPointRecords).length
+        + Object.keys(result.userNeedRecords).length
         + Object.keys(result.userStoryRecords).length
         + Object.keys(result.jiraIssueRecords).length;
       if (merged === 0) return s;
